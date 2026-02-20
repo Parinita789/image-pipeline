@@ -2,10 +2,11 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"image-pipeline/internal/models"
 	db "image-pipeline/internal/repository"
+	"image-pipeline/internal/resilence"
 	s3client "image-pipeline/internal/s3"
-	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/google/uuid"
@@ -16,26 +17,34 @@ type UploadService struct {
 	S3     *s3client.S3Client
 	Repo   *db.ImageRepo
 	Logger *zap.Logger
+	s3Exec resilence.Executor
 }
 
-func NewUploadService(s3 *s3client.S3Client, repo *db.ImageRepo, logger *zap.Logger) *UploadService {
+func NewUploadService(s3 *s3client.S3Client, repo *db.ImageRepo, logger *zap.Logger, executor resilence.Executor) *UploadService {
 	return &UploadService{
 		S3:     s3,
 		Repo:   repo,
 		Logger: logger,
+		s3Exec: executor,
 	}
 }
 
-func (s *UploadService) ProcessUpload(filename string, fileData []byte) (string, string, error) {
+func (s *UploadService) ProcessUpload(ctx context.Context, filename string, fileData []byte) (string, string, error) {
 	id := uuid.New().String()
 
 	rawKey := "raw/" + id + "_" + filename
 	compressedKey := "compressed/" + id + "_" + filename
 
-	// upload raw image to S3
+	var rawUrl string
+	// upload raw image to S3 with resilience
+	err := s.runS3(ctx, func(ctx context.Context) error {
+		var err error
+		rawUrl, err = s.S3.UploadObject(ctx, rawKey, bytes.NewReader(fileData))
+		return err
+	})
 
-	rawUrl, err := s.S3.UploadObject(rawKey, bytes.NewReader(fileData))
 	if err != nil {
+		s.Logger.Error("failed to upload raw image", zap.Error(err))
 		return "", "", err
 	}
 
@@ -46,9 +55,19 @@ func (s *UploadService) ProcessUpload(filename string, fileData []byte) (string,
 		return "", "", err
 	}
 
-	// upload compressed image to S3
-	compressedUrl, err := s.S3.UploadObject(compressedKey, bytes.NewReader(compressData))
+	var compressedUrl string
+	// upload compressed image to S3 with resilience
+	err = s.runS3(ctx, func(ctx context.Context) error {
+		var err error
+		compressedUrl, err = s.S3.UploadObject(ctx, compressedKey, bytes.NewReader(compressData))
+		if err != nil {
+			s.Logger.Error("failed to upload compressed image", zap.Error(err))
+		}
+		return err
+	})
+
 	if err != nil {
+		s.Logger.Error("failed to upload compressed image", zap.Error(err))
 		return "", "", err
 	}
 
@@ -57,11 +76,10 @@ func (s *UploadService) ProcessUpload(filename string, fileData []byte) (string,
 		Filename:      filename,
 		OriginalURL:   rawUrl,
 		CompressedURL: compressedUrl,
-		Status:        "compressed",
-		CreatedAt:     time.Now(),
 	}
-	err = s.Repo.Save(image)
+	err = s.Repo.Save(ctx, image)
 	if err != nil {
+		s.Logger.Error("failed to save image metadata in db", zap.Error(err))
 		return "", "", err
 	}
 

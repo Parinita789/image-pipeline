@@ -13,8 +13,8 @@ type S3Client struct {
 	Bucket string
 }
 
-func NewS3Client(bucket string) (*S3Client, error) {
-	cfg, err := config.LoadDefaultConfig(context.Background())
+func NewS3Client(region string, bucket string) (*S3Client, error) {
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 
 	if err != nil {
 		return nil, err
@@ -39,8 +39,8 @@ func New(region string, bucket string) (*S3Client, error) {
 	}, nil
 }
 
-func (c *S3Client) UploadObject(key string, body io.Reader) (string, error) {
-	_, err := c.S3.PutObject(context.Background(), &s3.PutObjectInput{
+func (c *S3Client) UploadObject(ctx context.Context, key string, body io.Reader) (string, error) {
+	_, err := c.S3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &c.Bucket,
 		Key:    &key,
 		Body:   body,
@@ -49,8 +49,8 @@ func (c *S3Client) UploadObject(key string, body io.Reader) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	url := "https://" + c.Bucket + ".s3.amazonaws.com/" + key
-	println("Uploaded to S3 at URL:", url)
 	return url, nil
 }
 
@@ -75,10 +75,10 @@ func (c *S3Client) DeleteObject(key string) error {
 	return err
 }
 
-func (c *S3Client) UploadBytes(key string, data io.Reader) error {
-	_, err := c.UploadObject(key, data)
-	return err
-}
+// func (c *S3Client) UploadBytes(key string, data io.Reader) error {
+// 	_, err := c.UploadObject(key, data)
+// 	return err
+// }
 
 func (c *S3Client) URL(key string) string {
 	return "https://" + c.Bucket + ".s3.amazonaws.com/" + key

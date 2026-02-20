@@ -6,6 +6,7 @@ import (
 	"image-pipeline/internal/handlers"
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/repository"
+	"image-pipeline/internal/resilence"
 	s3client "image-pipeline/internal/s3"
 	"image-pipeline/internal/services"
 	"image-pipeline/pkg/config"
@@ -22,24 +23,50 @@ type App struct {
 func NewApp() *App {
 	log := logger.NewLogger()
 
+	// Load Config
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Error("Failed to load config", zap.Error(err))
 	}
 
-	// create low level deps
+	// Connect MongoDB
 	db, _ := repository.Connect(cfg.MongoURI)
-	repo := repository.NewImageRepo(db)
-	s3, _ := s3client.NewS3Client(cfg.S3Bucket)
+	if err != nil {
+		log.Fatal("Mongo connection failed", zap.Error(err))
+	}
 
-	// create services
-	uploadService := services.NewUploadService(s3, repo, log)
+	// Create S3 Client
+	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
+	if err != nil {
+		log.Fatal("S3 connection failed", zap.Error(err))
+	}
 
-	// create handlers
+	// Create Resilience Executors
+	mongoExec := resilence.NewExecutor(log, "mongo")
+	s3Exec := resilence.NewExecutor(log, "s3")
+
+	// Repository Layer
+	repo := repository.NewImageRepo(db, mongoExec)
+
+	// Service Layer
+	uploadService := services.NewUploadService(
+		s3Client,
+		repo,
+		log,
+		s3Exec,
+	)
+
+	// Handler Layer
 	uploadHandler := handlers.NewUploadHandler(uploadService)
+
+	// Router Setup
 	router := chi.NewRouter()
 	RegisterRoutes(router, uploadHandler)
-	return &App{router: router, logger: log}
+
+	return &App{
+		router: router,
+		logger: log,
+	}
 }
 
 func (a *App) Run() {
