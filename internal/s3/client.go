@@ -66,19 +66,14 @@ func (c *S3Client) GetObject(key string) (io.ReadCloser, error) {
 	return out.Body, nil
 }
 
-func (c *S3Client) DeleteObject(key string) error {
-	_, err := c.S3.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+func (c *S3Client) DeleteObject(ctx context.Context, key string) error {
+	_, err := c.S3.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &c.Bucket,
 		Key:    &key,
 	})
 
 	return err
 }
-
-// func (c *S3Client) UploadBytes(key string, data io.Reader) error {
-// 	_, err := c.UploadObject(key, data)
-// 	return err
-// }
 
 func (c *S3Client) URL(key string) string {
 	return "https://" + c.Bucket + ".s3.amazonaws.com/" + key

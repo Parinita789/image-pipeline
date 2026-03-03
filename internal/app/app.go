@@ -1,15 +1,17 @@
 package app
 
 import (
+	"context"
 	"net/http"
 
+	"image-pipeline/internal/auth"
+	"image-pipeline/internal/config"
 	"image-pipeline/internal/handlers"
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/resilence"
 	s3client "image-pipeline/internal/s3"
 	"image-pipeline/internal/services"
-	"image-pipeline/pkg/config"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -21,51 +23,74 @@ type App struct {
 }
 
 func NewApp() *App {
-	log := logger.NewLogger()
+	logger := logger.NewLogger()
 
 	// Load Config
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Error("Failed to load config", zap.Error(err))
+		logger.Error("Failed to load config", zap.Error(err))
 	}
 
 	// Connect MongoDB
 	db, _ := repository.Connect(cfg.MongoURI)
 	if err != nil {
-		log.Fatal("Mongo connection failed", zap.Error(err))
+		logger.Fatal("Mongo connection failed", zap.Error(err))
 	}
 
 	// Create S3 Client
 	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
 	if err != nil {
-		log.Fatal("S3 connection failed", zap.Error(err))
+		logger.Fatal("S3 connection failed", zap.Error(err))
 	}
 
 	// Create Resilience Executors
-	mongoExec := resilence.NewExecutor(log, "mongo")
-	s3Exec := resilence.NewExecutor(log, "s3")
+	mongoExec := resilence.NewExecutor(logger, "mongo")
+	s3Exec := resilence.NewExecutor(logger, "s3")
 
 	// Repository Layer
-	repo := repository.NewImageRepo(db, mongoExec)
+	imageRepo := repository.NewImageRepo(db, mongoExec)
+	imageRepo.CreateIndexes(context.Background())
+
+	userRepo := repository.NewUserRepo(db)
 
 	// Service Layer
-	uploadService := services.NewUploadService(
+	imageService := services.NewImageService(
+		imageRepo,
+		logger,
 		s3Client,
-		repo,
-		log,
 		s3Exec,
 	)
 
+	authService := auth.NewAuthService(
+		userRepo,
+		cfg.JWTSecret,
+		logger,
+	)
+
+	userService := services.NewUserService(
+		userRepo,
+		cfg.JWTSecret,
+		logger,
+	)
+
 	// Handler Layer
-	uploadHandler := handlers.NewUploadHandler(uploadService)
+	authHandler := auth.NewAuthHandler(authService, logger)
+	imageHandler := handlers.NewImageHandler(imageService, logger)
+	userHandler := handlers.NewUserHandler(userService, logger)
 
 	// Router Setup
 	router := chi.NewRouter()
-	RegisterRoutes(router, uploadHandler)
+	RegisterRoutes(
+		router,
+		authHandler,
+		imageHandler,
+		userHandler,
+		cfg.JWTSecret,
+	)
 
 	return &App{
 		router: router,
-		logger: log,
+		logger: logger,
 	}
 }
 

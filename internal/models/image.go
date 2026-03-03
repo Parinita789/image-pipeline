@@ -1,12 +1,18 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 type Image struct {
-	ID            string    `bson:"_id,omitempty"`
-	Filename      string    `bson:"filename"`
-	Status        string    `bson:"status"`
-	OriginalURL   string    `bson:"original_url"`
-	CompressedURL string    `bson:"compressed_url,omitempty"`
-	CreatedAt     time.Time `bson:"created_at"`
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	UserID        string             `bson:"userId" json:"userId"`
+	RequestID     string             `bson:"requestId" json:"requestId"`
+	Filename      string             `bson:"filename" json:"filename"`
+	Status        string             `bson:"status" json:"status"`
+	OriginalURL   string             `bson:"originalUrl" json:"originalUrl"`
+	CompressedURL string             `bson:"compressedUrl,omitempty" json:"compressedUrl"`
+	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
 }

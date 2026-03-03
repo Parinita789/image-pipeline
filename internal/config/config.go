@@ -13,6 +13,7 @@ type Config struct {
 	SQSQueueURL string
 	MongoURI    string
 	MongoDbName string
+	JWTSecret   string
 	Port        string
 	WorkerCount int
 }
@@ -29,6 +30,7 @@ func LoadConfig() (*Config, error) {
 		SQSQueueURL: os.Getenv("SQS_QUEUE_URL"),
 		MongoURI:    os.Getenv("MONGO_URI"),
 		MongoDbName: os.Getenv("MONGO_DB"),
+		JWTSecret:   os.Getenv("JWT_SECRET"),
 		Port:        os.Getenv("PORT"),
 		WorkerCount: 5,
 	}
