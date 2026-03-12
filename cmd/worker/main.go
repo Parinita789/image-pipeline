@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"image-pipeline/internal/config"
-	"image-pipeline/internal/logger"
+	applogger "image-pipeline/internal/logger"
 	"image-pipeline/internal/queue"
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/resilence"
@@ -18,30 +18,31 @@ import (
 
 func main() {
 
-	logger := logger.NewLogger()
+	log := applogger.NewLogger()
+	applogger.Init(log)
 
 	// Load Config
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		logger.Error("Failed to load config", zap.Error(err))
+		log.Error("Failed to load config", zap.Error(err))
 	}
 
 	// Connect MongoDB
 	db, _ := repository.Connect(cfg.MongoURI)
 	if err != nil {
-		logger.Fatal("Mongo connection failed", zap.Error(err))
+		log.Fatal("Mongo connection failed", zap.Error(err))
 	}
 
 	// Create S3 Client
-	s3Client, _ := s3.NewS3Client(cfg.AWSRegion, cfg.S3Bucket, logger)
+	s3Client, _ := s3.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
 	if err != nil {
-		logger.Fatal("S3 connection failed", zap.Error(err))
+		log.Fatal("S3 connection failed", zap.Error(err))
 	}
 
 	// Create Resilience Executors
-	mongoExec := resilence.NewExecutor(logger, "mongo", 3, 30*time.Second)
-	s3Exec := resilence.NewExecutor(logger, "s3", 3, 30*time.Second)
-	sqsExec := resilence.NewExecutor(logger, "sqs", 3, 30*time.Second)
+	mongoExec := resilence.NewExecutor(log, "mongo", 3, 30*time.Second)
+	s3Exec := resilence.NewExecutor(log, "s3", 3, 30*time.Second)
+	sqsExec := resilence.NewExecutor(log, "sqs", 3, 30*time.Second)
 
 	// Repository Layer
 	imageRepo := repository.NewImageRepo(db, mongoExec)
@@ -55,7 +56,6 @@ func main() {
 	imageService := services.NewImageService(
 		imageRepo,
 		idemRepo,
-		logger,
 		s3Client,
 		s3Exec,
 		SQSClient,
@@ -67,7 +67,7 @@ func main() {
 		*idemRepo,
 		SQSClient,
 		imageService,
-		logger,
+		log,
 		cfg.WorkerCount,
 	)
 

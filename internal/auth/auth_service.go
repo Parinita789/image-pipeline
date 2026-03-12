@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"image-pipeline/internal/logger"
 	"image-pipeline/internal/models"
 	db "image-pipeline/internal/repository"
 
@@ -26,14 +27,12 @@ type LoginRequest struct {
 type AuthService struct {
 	UserRepo  *db.UserRepo
 	jwtSecret string
-	logger    *zap.Logger
 }
 
-func NewAuthService(userRepo *db.UserRepo, secret string, logger *zap.Logger) *AuthService {
+func NewAuthService(userRepo *db.UserRepo, secret string) *AuthService {
 	return &AuthService{
 		UserRepo:  userRepo,
 		jwtSecret: secret,
-		logger:    logger,
 	}
 }
 
@@ -53,6 +52,7 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (strin
 }
 
 func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, error) {
+	log := logger.FromContext(ctx)
 	user, err := s.UserRepo.GetUserByEmail(ctx, req.Email)
 	if err != nil || user == nil {
 		return "", errors.New("invalid email or password")
@@ -60,7 +60,7 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, err
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
-		s.logger.Info("Failed login attempt", zap.String("email", req.Email))
+		log.Info("Failed login attempt", zap.String("email", req.Email))
 		return "", errors.New("invalid credentials")
 	}
 	token, _ := GenerateJWT(user.ID.Hex())

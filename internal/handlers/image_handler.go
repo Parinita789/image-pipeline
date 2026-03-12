@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"image-pipeline/internal/logger"
 	"image-pipeline/internal/middleware"
 	"image-pipeline/internal/services"
 	"image-pipeline/pkg/response"
@@ -14,21 +15,22 @@ import (
 
 type ImageHandler struct {
 	Service *services.ImageService
-	logger  *zap.Logger
 }
 
-func NewImageHandler(service *services.ImageService, logger *zap.Logger) *ImageHandler {
+func NewImageHandler(service *services.ImageService) *ImageHandler {
 	return &ImageHandler{
 		Service: service,
-		logger:  logger,
 	}
 }
 
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.FromContext(ctx)
+	log.Info("upload started")
+
 	requestId := middleware.GetRequestId(r)
 	userId := middleware.GetUserID(r)
 	idemKey := middleware.GetIdemKey(r)
-	ctx := r.Context()
 
 	if requestId == "" {
 		response.Error(w, http.StatusBadRequest, "missing X-Request-ID")
@@ -37,14 +39,14 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	err := r.ParseMultipartForm(32 << 20)
 	if err != nil {
-		h.logger.Error("invalid multipart form", zap.Error(err))
+		log.Error("invalid multipart form", zap.Error(err))
 		response.Error(w, http.StatusBadRequest, "Failed to read file from request")
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		h.logger.Error("File missing", zap.Error(err))
+		log.Error("File missing", zap.Error(err))
 		response.Error(w, http.StatusBadRequest, "file missing")
 		return
 	}
@@ -54,7 +56,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	buf := make([]byte, 512)
 	_, err = file.Read(buf)
 	if err != nil {
-		h.logger.Error("failed to read file", zap.Error(err))
+		log.Error("failed to read file", zap.Error(err))
 		response.Error(w, http.StatusInternalServerError, "failed to read file")
 		return
 	}
@@ -95,7 +97,8 @@ func isAllowedType(ct string) bool {
 
 func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
+	log := logger.FromContext(ctx)
+	log.Info("fetching images...")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
@@ -111,7 +114,7 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 
 	paginatedResponse, err := h.Service.GetImages(ctx, page, limit, userId)
 	if err != nil {
-		h.logger.Error("Failed to get images", zap.Error(err))
+		log.Error("Failed to get images", zap.Error(err))
 		http.Error(w, "Failed to get images", http.StatusInternalServerError)
 		return
 	}
@@ -126,11 +129,13 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 
 func (h *ImageHandler) DeleteImage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	log := logger.FromContext(r.Context())
+	log.Info("deleting image...")
 	id := chi.URLParam(r, "id")
 
 	err := h.Service.DeleteImage(ctx, id)
 	if err != nil {
-		h.logger.Error("Failed to delete image", zap.Error(err))
+		log.Error("Failed to delete image", zap.Error(err))
 		http.Error(w, "Failed to delete image", http.StatusInternalServerError)
 		return
 	}

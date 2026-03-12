@@ -2,9 +2,11 @@ package middleware
 
 import (
 	"context"
+	"image-pipeline/internal/logger"
 	"net/http"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 func RequestID(next http.Handler) http.Handler {
@@ -13,7 +15,14 @@ func RequestID(next http.Handler) http.Handler {
 		if requestId == "" {
 			requestId = uuid.New().String()
 		}
+		w.Header().Set("X-Request-ID", requestId)
+		log := logger.FromContext(r.Context()).With(
+			zap.String("requestId", requestId),
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+		)
 		ctx := context.WithValue(r.Context(), RequestIdKey, requestId)
+		ctx = logger.WithContext(ctx, log)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

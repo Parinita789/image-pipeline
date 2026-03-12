@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"image-pipeline/internal/logger"
 	"io"
 	"net/url"
 	"time"
@@ -18,10 +19,9 @@ type S3Client struct {
 	S3       *s3.Client
 	Uploader *manager.Uploader
 	Bucket   string
-	Logger   *zap.Logger
 }
 
-func NewS3Client(region string, bucket string, logger *zap.Logger) (*S3Client, error) {
+func NewS3Client(region string, bucket string) (*S3Client, error) {
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 
 	if err != nil {
@@ -40,7 +40,6 @@ func NewS3Client(region string, bucket string, logger *zap.Logger) (*S3Client, e
 		S3:       client,
 		Bucket:   bucket,
 		Uploader: uploader,
-		Logger:   logger,
 	}, nil
 }
 
@@ -50,6 +49,7 @@ func (s *S3Client) UploadStream(
 	key string,
 	body io.Reader,
 ) (string, error) {
+	log := logger.FromContext(parentCtx)
 	ctx, cancel := context.WithTimeout(parentCtx, 2*time.Minute)
 	defer cancel()
 	_, err := s.Uploader.Upload(ctx, &s3.PutObjectInput{
@@ -59,6 +59,7 @@ func (s *S3Client) UploadStream(
 	})
 
 	if err != nil {
+		log.Error("S3 Stream Upload Failed!", zap.Error(err))
 		return "", fmt.Errorf("s3 stream upload failed: %w", err)
 	}
 
@@ -71,6 +72,7 @@ func (s *S3Client) DownloadStream(
 	ctx context.Context,
 	key string,
 ) (io.ReadCloser, error) {
+	log := logger.FromContext(ctx)
 
 	out, err := s.S3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.Bucket),
@@ -78,6 +80,7 @@ func (s *S3Client) DownloadStream(
 	})
 
 	if err != nil {
+		log.Error("S3 download Failed!", zap.Error(err))
 		return nil, fmt.Errorf("s3 download failed: %w", err)
 	}
 
@@ -86,7 +89,7 @@ func (s *S3Client) DownloadStream(
 
 // CopyObject copies an object within S3 — no data leaves AWS, zero bandwidth cost
 func (s *S3Client) CopyObject(ctx context.Context, srcKey, dstKey string) (string, error) {
-
+	log := logger.FromContext(ctx)
 	copySource := url.QueryEscape(s.Bucket + "/" + srcKey)
 
 	_, err := s.S3.CopyObject(ctx, &s3.CopyObjectInput{
@@ -96,6 +99,7 @@ func (s *S3Client) CopyObject(ctx context.Context, srcKey, dstKey string) (strin
 	})
 
 	if err != nil {
+		log.Error("S3 Copy Failed!", zap.Error(err))
 		return "", fmt.Errorf("s3 copy failed: %w", err)
 	}
 

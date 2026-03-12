@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image-pipeline/internal/dto"
+	"image-pipeline/internal/logger"
 	"image-pipeline/internal/middleware"
 	"strings"
 
@@ -20,17 +21,18 @@ import (
 
 type AuthHandler struct {
 	authSvc *AuthService
-	logger  *zap.Logger
 }
 
-func NewAuthHandler(authSvc *AuthService, logger *zap.Logger) *AuthHandler {
+func NewAuthHandler(authSvc *AuthService) *AuthHandler {
 	return &AuthHandler{
 		authSvc: authSvc,
-		logger:  logger,
 	}
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.FromContext(ctx)
+
 	var req RegisterRequest
 	var dto dto.CreateUserDTO
 
@@ -40,6 +42,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validator.ValidateStruct(dto); err != nil {
+		log.Error("Invalid data", zap.Error(err))
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -55,6 +58,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		appErr := err.(*errors.AppError)
+		log.Error("User Registration failed!", zap.Error(err))
 		response.Error(w, appErr.Code, appErr.Message)
 		return
 	}
@@ -63,6 +67,9 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.FromContext(ctx)
+
 	var req LoginRequest
 	var dto dto.LoginUserDTO
 
@@ -72,6 +79,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validator.ValidateStruct(dto); err != nil {
+		log.Error("Invalid Login Credentials!", zap.Error(err))
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -83,6 +91,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.authSvc.Login(r.Context(), &req)
 	if err != nil {
+		log.Error("Login Failed!", zap.Error(err))
 		response.Error(w, http.StatusUnauthorized, err.Error())
 		return
 	}
@@ -95,6 +104,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) JWTAuth(secret string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
 			tokenString := r.Header.Get("Authorization")
 			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 			tokenString = strings.TrimSpace(tokenString)
@@ -111,7 +121,7 @@ func (h *AuthHandler) JWTAuth(secret string) func(next http.Handler) http.Handle
 			})
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
-				response.Error(w, http.StatusUnauthorized, "Invalid token claims")
+				response.Error(w, http.StatusUnauthorized, "Invalid Token Claims")
 				return
 			}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image-pipeline/internal/logger"
 	"image-pipeline/internal/models"
 	"image-pipeline/internal/queue"
 	db "image-pipeline/internal/repository"
@@ -22,7 +23,6 @@ import (
 type ImageService struct {
 	ImageRepo *db.ImageRepo
 	IdemRepo  *db.IdempotencyRepo
-	Logger    *zap.Logger
 	S3        *s3client.S3Client
 	s3Exec    resilence.Executor
 	sqsQueue  *queue.SQSClient
@@ -39,7 +39,6 @@ type PaginatedResponse struct {
 func NewImageService(
 	repo *db.ImageRepo,
 	idemRepo *db.IdempotencyRepo,
-	logger *zap.Logger,
 	s3 *s3client.S3Client,
 	s3Exec resilence.Executor,
 	sqsQueue *queue.SQSClient,
@@ -48,7 +47,6 @@ func NewImageService(
 	return &ImageService{
 		ImageRepo: repo,
 		IdemRepo:  idemRepo,
-		Logger:    logger,
 		S3:        s3,
 		s3Exec:    s3Exec,
 		sqsQueue:  sqsQueue,
@@ -64,13 +62,13 @@ func (s *ImageService) EnqueueUpload(
 	filename string,
 	body io.Reader,
 ) error {
-
+	log := logger.FromContext(ctx)
 	tempKey := fmt.Sprintf("tmp/%s/%s/%s_%s", userId, requestId, filename)
-	s.Logger.Info("S3 temp Key", zap.String("s3TempKey", tempKey))
+	log.Info("S3 temp Key", zap.String("s3TempKey", tempKey))
 
 	_, err := s.S3.UploadStream(ctx, tempKey, body)
 	if err != nil {
-		s.Logger.Error("temp upload failed:", zap.Error(err))
+		log.Error("temp upload failed:", zap.Error(err))
 		return err
 	}
 
@@ -95,9 +93,10 @@ func (s *ImageService) ProcessUpload(
 	ctx context.Context,
 	msg models.UploadMessage,
 ) error {
+	log := logger.FromContext(ctx)
 	idemKey := msg.IdempotencyKey
 
-	s.Logger.Info("processing upload",
+	log.Info("processing upload",
 		zap.String("requestid", msg.RequestId),
 		zap.String("idemKey", idemKey),
 		zap.String("file", msg.FileName),
@@ -106,19 +105,19 @@ func (s *ImageService) ProcessUpload(
 	record, err := s.IdemRepo.Get(ctx, idemKey)
 
 	if err != nil {
-		s.Logger.Error("Failed to fetch idempotency record", zap.Error(err))
+		log.Error("Failed to fetch idempotency record", zap.Error(err))
 		return err
 	}
 
 	if record != nil && record.Status == models.StatusCompleted {
-		s.Logger.Info("request already processed", zap.String("idemKey", idemKey))
+		log.Info("request already processed", zap.String("idemKey", idemKey))
 		return nil
 	}
 
 	// Mark as processing
 	err = s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusProcessing)
 	if err != nil {
-		s.Logger.Error("failed to mark processing", zap.Error(err))
+		log.Error("failed to mark processing", zap.Error(err))
 	}
 
 	// Generate S3 key
@@ -128,26 +127,26 @@ func (s *ImageService) ProcessUpload(
 		idemKey,
 		msg.FileName,
 	)
-	s.Logger.Info("s3 raw key", zap.String("s3RawKey", rawKey))
+	log.Info("s3 raw key", zap.String("s3RawKey", rawKey))
 
 	// Move temp uploaded file to raw location
 	rawUrl, err := s.copyInS3(ctx, msg.TempS3Key, rawKey)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
-		s.Logger.Error("failed to move temp files to raw", zap.Error(err))
+		log.Error("failed to move temp files to raw", zap.Error(err))
 		return err
 	}
 
 	rawData, err := s.downloadBytesFromS3(ctx, rawKey)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
-		s.Logger.Error("failed to download raw image for compression", zap.Error(err))
+		log.Error("failed to download raw image for compression", zap.Error(err))
 		return err
 	}
 
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
-		s.Logger.Error("failed to read image stream", zap.Error(err))
+		log.Error("failed to read image stream", zap.Error(err))
 		return err
 	}
 
@@ -165,7 +164,7 @@ func (s *ImageService) ProcessUpload(
 		idemKey,
 		msg.FileName,
 	)
-	s.Logger.Info("s3Compressedkey", zap.String("compressedKey", compressedKey))
+	log.Info("s3Compressedkey", zap.String("compressedKey", compressedKey))
 
 	compressedUrl, err := s.UploadToS3(
 		ctx,
@@ -175,7 +174,7 @@ func (s *ImageService) ProcessUpload(
 	)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
-		s.Logger.Error("compressed upload failed", zap.Error(err))
+		log.Error("compressed upload failed", zap.Error(err))
 		return err
 	}
 
@@ -183,22 +182,22 @@ func (s *ImageService) ProcessUpload(
 	err = s.SaveMetaData(ctx, idemKey, msg.UserId, msg.FileName, rawUrl, compressedUrl)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
-		s.Logger.Error("Error while saving image record in db", zap.Error(err))
+		log.Error("Error while saving image record in db", zap.Error(err))
 		return err
 	}
 
 	// Delete temp file — raw key is the permanent location now
 	if err := s.S3.DeleteObject(ctx, msg.TempS3Key); err != nil {
-		s.Logger.Warn("failed to delete temp file", zap.String("key", msg.TempS3Key), zap.Error(err))
+		log.Warn("failed to delete temp file", zap.String("key", msg.TempS3Key), zap.Error(err))
 	}
 
 	// Mark completed
 	err = s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusCompleted)
 	if err != nil {
-		s.Logger.Error("failed to mark completed — requires manual reconciliation", zap.Error(err))
+		log.Error("failed to mark completed — requires manual reconciliation", zap.Error(err))
 	}
 
-	s.Logger.Info("upload pipeline completed",
+	log.Info("upload pipeline completed",
 		zap.String("raw_url", rawUrl),
 		zap.String("compressed_url", compressedUrl),
 	)
@@ -213,6 +212,7 @@ func (s *ImageService) UploadToS3(
 	data []byte,
 	imageType string,
 ) (string, error) {
+	log := logger.FromContext(ctx)
 	var url string
 
 	err := s.runS3(ctx, func(ctx context.Context) error {
@@ -222,7 +222,7 @@ func (s *ImageService) UploadToS3(
 	})
 
 	if err != nil {
-		s.Logger.Error(
+		log.Error(
 			"s3_upload_failed",
 			zap.String("type", imageType),
 			zap.Error(err),
@@ -230,7 +230,7 @@ func (s *ImageService) UploadToS3(
 		return "", err
 	}
 
-	s.Logger.Info(
+	log.Info(
 		"s3_upload_success",
 		zap.String("type", imageType),
 		zap.String("url", url),
@@ -289,12 +289,10 @@ func (s *ImageService) CompressImage(data []byte) ([]byte, error) {
 		err = encoder.Encode(&buf, img)
 
 	default:
-		s.Logger.Error("unsupported image format:", zap.String("format", format))
 		return nil, fmt.Errorf("unsupported image format: %s", format)
 	}
 
 	if err != nil {
-		s.Logger.Error("Err in image compression", zap.Error(err))
 		return nil, err
 	}
 
@@ -309,6 +307,7 @@ func (s *ImageService) SaveMetaData(
 	rawURL string,
 	compressedUrl string,
 ) error {
+	log := logger.FromContext(ctx)
 	image := models.Image{
 		RequestID:     requestID,
 		UserID:        userID,
@@ -319,11 +318,11 @@ func (s *ImageService) SaveMetaData(
 	err := s.ImageRepo.Save(ctx, image)
 
 	if err != nil {
-		s.Logger.Error("image save failed", zap.Error(err))
+		log.Error("image save failed", zap.Error(err))
 		return err
 	}
 
-	s.Logger.Info("image saved in db successfully")
+	log.Info("image saved in db successfully")
 
 	return nil
 }
@@ -348,9 +347,10 @@ func (s *ImageService) GetImages(
 }
 
 func (s *ImageService) DeleteImage(ctx context.Context, id string) error {
+	log := logger.FromContext(ctx)
 	img, err := s.ImageRepo.DeleteImage(ctx, id)
 	if err != nil {
-		s.Logger.Error("failed to delete image", zap.Error(err))
+		log.Error("failed to delete image", zap.Error(err))
 		return err
 	}
 
@@ -360,7 +360,7 @@ func (s *ImageService) DeleteImage(ctx context.Context, id string) error {
 	})
 
 	if err != nil {
-		s.Logger.Error("failed to delete raw image from S3", zap.Error(err))
+		log.Error("failed to delete raw image from S3", zap.Error(err))
 		return err
 	}
 

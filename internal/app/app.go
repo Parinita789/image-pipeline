@@ -8,11 +8,12 @@ import (
 	"image-pipeline/internal/auth"
 	"image-pipeline/internal/config"
 	"image-pipeline/internal/handlers"
-	"image-pipeline/internal/logger"
+	applogger "image-pipeline/internal/logger"
 	"image-pipeline/internal/queue"
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/resilence"
 	s3client "image-pipeline/internal/s3"
+
 	"image-pipeline/internal/services"
 
 	"github.com/go-chi/chi/v5"
@@ -25,30 +26,30 @@ type App struct {
 }
 
 func NewApp() *App {
-	logger := logger.NewLogger()
-
+	log := applogger.NewLogger()
+	applogger.Init(log)
 	// Load Config
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		logger.Error("Failed to load config", zap.Error(err))
+		log.Error("Failed to load config", zap.Error(err))
 	}
 
 	// Connect MongoDB
 	db, _ := repository.Connect(cfg.MongoURI)
 	if err != nil {
-		logger.Fatal("Mongo connection failed", zap.Error(err))
+		log.Fatal("Mongo connection failed", zap.Error(err))
 	}
 
 	// Create S3 Client
-	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket, logger)
+	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
 	if err != nil {
-		logger.Fatal("S3 connection failed", zap.Error(err))
+		log.Fatal("S3 connection failed", zap.Error(err))
 	}
 
 	// Create Resilience Executors
-	mongoExec := resilence.NewExecutor(logger, "mongo", 3, 30*time.Second)
-	s3Exec := resilence.NewExecutor(logger, "s3", 3, 30*time.Second)
-	sqsExec := resilence.NewExecutor(logger, "sqs", 3, 30*time.Second)
+	mongoExec := resilence.NewExecutor(log, "mongo", 3, 30*time.Second)
+	s3Exec := resilence.NewExecutor(log, "s3", 3, 30*time.Second)
+	sqsExec := resilence.NewExecutor(log, "sqs", 3, 30*time.Second)
 
 	// Repository Layer
 	imageRepo := repository.NewImageRepo(db, mongoExec)
@@ -64,7 +65,6 @@ func NewApp() *App {
 	imageService := services.NewImageService(
 		imageRepo,
 		idemRepo,
-		logger,
 		s3Client,
 		s3Exec,
 		SQSClient,
@@ -74,19 +74,17 @@ func NewApp() *App {
 	authService := auth.NewAuthService(
 		userRepo,
 		cfg.JWTSecret,
-		logger,
 	)
 
 	userService := services.NewUserService(
 		userRepo,
 		cfg.JWTSecret,
-		logger,
 	)
 
 	// Handler Layer
-	authHandler := auth.NewAuthHandler(authService, logger)
-	imageHandler := handlers.NewImageHandler(imageService, logger)
-	userHandler := handlers.NewUserHandler(userService, logger)
+	authHandler := auth.NewAuthHandler(authService)
+	imageHandler := handlers.NewImageHandler(imageService)
+	userHandler := handlers.NewUserHandler(userService)
 
 	// Router Setup
 	router := chi.NewRouter()
@@ -101,7 +99,7 @@ func NewApp() *App {
 
 	return &App{
 		router: router,
-		logger: logger,
+		logger: log,
 	}
 }
 

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"image-pipeline/internal/models"
 	"image-pipeline/internal/queue"
 	"image-pipeline/internal/repository"
@@ -74,9 +75,10 @@ func (w *Worker) workerLoop(ctx context.Context, id int) {
 			w.logger.Error("Invalid message", zap.Error(err))
 		}
 
-		w.logger.Info("processing job",
-			zap.Int("worker_id", id),
-			zap.String("payload", payload.FileName),
+		jobLog := w.logger.With(
+			zap.String("idempotency_key", payload.IdempotencyKey),
+			zap.String("worker_id", fmt.Sprintf("%d", id)),
+			zap.String("file", payload.FileName),
 		)
 
 		jobCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -85,13 +87,13 @@ func (w *Worker) workerLoop(ctx context.Context, id int) {
 		cancel()
 
 		if err != nil {
-			w.logger.Error("job failed", zap.Error(err))
+			jobLog.Error("job failed", zap.Error(err))
 			continue
 		}
 
 		err = w.sqs.DeleteMessage(ctx, *msg.ReceiptHandle)
 		if err != nil {
-			w.logger.Error("delete message failed", zap.Error(err))
+			jobLog.Error("delete message failed", zap.Error(err))
 		}
 
 	}
