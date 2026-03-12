@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"image-pipeline/internal/models"
 	db "image-pipeline/internal/repository"
@@ -39,7 +38,6 @@ func NewAuthService(userRepo *db.UserRepo, secret string, logger *zap.Logger) *A
 }
 
 func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (string, error) {
-	fmt.Println("req >>> ", req)
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), 10)
 	user := models.User{
 		FirstName: req.FirstName,
@@ -65,8 +63,7 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, err
 		s.logger.Info("Failed login attempt", zap.String("email", req.Email))
 		return "", errors.New("invalid credentials")
 	}
-
-	token, _ := GenerateJWT(user.ID.String())
+	token, _ := GenerateJWT(user.ID.Hex())
 
 	return token, nil
 }

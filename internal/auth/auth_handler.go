@@ -2,10 +2,10 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"image-pipeline/internal/dto"
 	"image-pipeline/internal/middleware"
+	"strings"
 
 	"image-pipeline/pkg/errors"
 	"image-pipeline/pkg/request"
@@ -35,12 +35,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var dto dto.CreateUserDTO
 
 	if err := request.DecodeJSON(r, &dto); err != nil {
-		response.Error(w, 400, "Invalid JSON")
+		response.Error(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
 	if err := validator.ValidateStruct(dto); err != nil {
-		response.Error(w, 400, err.Error())
+		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -67,12 +67,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var dto dto.LoginUserDTO
 
 	if err := request.DecodeJSON(r, &dto); err != nil {
-		response.Error(w, 400, "Invalid JSON")
+		response.Error(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
 	if err := validator.ValidateStruct(dto); err != nil {
-		response.Error(w, 400, err.Error())
+		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -83,11 +83,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.authSvc.Login(r.Context(), &req)
 	if err != nil {
-		http.Error(w, err.Error(), 401)
+		response.Error(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	response.Success(w, "User Logged In Successfully!", map[string]string{
 		"token": token,
 	})
 }
@@ -96,8 +96,11 @@ func (h *AuthHandler) JWTAuth(secret string) func(next http.Handler) http.Handle
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenString := r.Header.Get("Authorization")
+			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+			tokenString = strings.TrimSpace(tokenString)
+
 			if tokenString == "" {
-				http.Error(w, "Missing token", http.StatusUnauthorized)
+				response.Error(w, http.StatusUnauthorized, "Missing token")
 				return
 			}
 			token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -106,16 +109,15 @@ func (h *AuthHandler) JWTAuth(secret string) func(next http.Handler) http.Handle
 				}
 				return []byte(secret), nil
 			})
-
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
-				http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+				response.Error(w, http.StatusUnauthorized, "Invalid token claims")
 				return
 			}
 
-			userId, ok := claims["user_id"].(string)
+			userId, ok := claims["userId"].(string)
 			if !ok {
-				http.Error(w, "user_id missing in token", http.StatusUnauthorized)
+				response.Error(w, http.StatusUnauthorized, "userId missing in token")
 				return
 			}
 

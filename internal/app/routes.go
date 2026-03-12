@@ -4,6 +4,7 @@ import (
 	"image-pipeline/internal/auth"
 	"image-pipeline/internal/handlers"
 	"image-pipeline/internal/middleware"
+	"image-pipeline/internal/repository"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -14,6 +15,7 @@ func RegisterRoutes(
 	imageHandler *handlers.ImageHandler,
 	userHandler *handlers.UserHandler,
 	jwtSecret string,
+	idemRepo *repository.IdempotencyRepo,
 ) {
 	// Global middleware
 	router.Use(middleware.RequestID)
@@ -29,10 +31,8 @@ func RegisterRoutes(
 	//Protected routes
 	router.Group(func(pr chi.Router) {
 		pr.Use(auth.JWTAuth(jwtSecret))
-
-		pr.Post("/image/upload", imageHandler.Upload)
+		pr.With(middleware.IdempotencyCheck(idemRepo)).Post("/image/upload", imageHandler.Upload)
 		pr.Get("/images", imageHandler.GetImages)
 		pr.Delete("/image/{id}", imageHandler.DeleteImage)
-
 	})
 }

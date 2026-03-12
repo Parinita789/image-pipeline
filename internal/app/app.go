@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"image-pipeline/internal/auth"
 	"image-pipeline/internal/config"
 	"image-pipeline/internal/handlers"
 	"image-pipeline/internal/logger"
+	"image-pipeline/internal/queue"
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/resilence"
 	s3client "image-pipeline/internal/s3"
@@ -38,27 +40,35 @@ func NewApp() *App {
 	}
 
 	// Create S3 Client
-	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
+	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket, logger)
 	if err != nil {
 		logger.Fatal("S3 connection failed", zap.Error(err))
 	}
 
 	// Create Resilience Executors
-	mongoExec := resilence.NewExecutor(logger, "mongo")
-	s3Exec := resilence.NewExecutor(logger, "s3")
+	mongoExec := resilence.NewExecutor(logger, "mongo", 3, 30*time.Second)
+	s3Exec := resilence.NewExecutor(logger, "s3", 3, 30*time.Second)
+	sqsExec := resilence.NewExecutor(logger, "sqs", 3, 30*time.Second)
 
 	// Repository Layer
 	imageRepo := repository.NewImageRepo(db, mongoExec)
 	imageRepo.CreateIndexes(context.Background())
 
+	idemRepo := repository.NewIdemRepo(db)
+
 	userRepo := repository.NewUserRepo(db)
 
+	// Create SQS client
+	SQSClient, _ := queue.NewSQSClient(cfg.SQSQueueURL)
 	// Service Layer
 	imageService := services.NewImageService(
 		imageRepo,
+		idemRepo,
 		logger,
 		s3Client,
 		s3Exec,
+		SQSClient,
+		sqsExec,
 	)
 
 	authService := auth.NewAuthService(
@@ -86,6 +96,7 @@ func NewApp() *App {
 		imageHandler,
 		userHandler,
 		cfg.JWTSecret,
+		idemRepo,
 	)
 
 	return &App{

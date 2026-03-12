@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"image-pipeline/internal/middleware"
 	"image-pipeline/internal/services"
-	"image-pipeline/internal/utils"
-	"io"
+	"image-pipeline/pkg/response"
 	"net/http"
 	"strconv"
 
@@ -26,51 +25,64 @@ func NewImageHandler(service *services.ImageService, logger *zap.Logger) *ImageH
 }
 
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
-	requestId := r.Header.Get("X-Request-ID")
-	// userId := middleware.GetUserID(r)
-
+	requestId := middleware.GetRequestId(r)
+	userId := middleware.GetUserID(r)
+	idemKey := middleware.GetIdemKey(r)
 	ctx := r.Context()
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		h.logger.Error("Failed to read file from request", zap.Error(err))
-		http.Error(w, "Failed to read file from request", http.StatusBadRequest)
+
+	if requestId == "" {
+		response.Error(w, http.StatusBadRequest, "missing X-Request-ID")
 		return
 	}
 
-	if requestId == "" {
-		requestId = utils.GenerateFingerPrint(header.Filename, []byte(r.RemoteAddr), r.Header.Get("X-User-ID"))
+	err := r.ParseMultipartForm(32 << 20)
+	if err != nil {
+		h.logger.Error("invalid multipart form", zap.Error(err))
+		response.Error(w, http.StatusBadRequest, "Failed to read file from request")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		h.logger.Error("File missing", zap.Error(err))
+		response.Error(w, http.StatusBadRequest, "file missing")
+		return
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		h.logger.Error("Failed to read file data", zap.Error(err))
-		http.Error(w, "Failed to read file data", http.StatusInternalServerError)
+	// validate content-type
+	contentType := header.Header.Get("Content-Type")
+	if !isAllowedType(contentType) {
+		response.Error(w, http.StatusBadRequest, "unsupported file type")
 		return
 	}
 
-	raw, compressed, err := h.Service.ProcessUpload(
-		ctx,
-		requestId,
-		header.Filename,
-		data,
-	)
-	if err != nil {
-		h.logger.Error("Failed to process upload", zap.Error(err))
-		http.Error(w, "Failed to process upload", http.StatusInternalServerError)
+	// validate size
+	if header.Size > 100*1024*1024 {
+		response.Error(w, http.StatusBadRequest, "file too large (max 100MB)")
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
-		"raw_url":        raw,
-		"compressed_url": compressed,
+	// streaming begins here
+	err = h.Service.EnqueueUpload(ctx, requestId, userId, idemKey, header.Filename, file)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "failed to enqueue upload")
+		return
+	}
+
+	response.Success(w, "upload started!", map[string]string{
+		"status":     "processing",
+		"request_id": requestId,
 	})
+}
 
-	h.logger.Info("Upload successful",
-		zap.String("filename", header.Filename),
-		zap.String("raw_url", raw),
-		zap.String("compressed_url", compressed),
-	)
+func isAllowedType(ct string) bool {
+	allowed := map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/webp": true,
+	}
+	return allowed[ct]
 }
 
 func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
@@ -87,8 +99,7 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 		limit = 10
 	}
 
-	userId := r.Context().
-		Value(middleware.UserIdKey).(string)
+	userId := middleware.GetUserID(r)
 
 	paginatedResponse, err := h.Service.GetImages(ctx, page, limit, userId)
 	if err != nil {

@@ -1,14 +1,11 @@
 package utils
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 )
 
-func GenerateFingerPrint(filename string, data []byte, userId string) string {
-	h := sha256.New()
-	h.Write([]byte(filename))
-	h.Write(data)
-	h.Write([]byte(userId))
-	return hex.EncodeToString(h.Sum(nil))
+func HashBody(filename string, contentLength int, userId string) string {
+	hashInput := fmt.Sprintf("%s:%d:%s", filename, contentLength, userId)
+	return hex.EncodeToString([]byte(hashInput))
 }

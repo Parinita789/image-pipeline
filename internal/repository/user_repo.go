@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"image-pipeline/internal/models"
 	"time"
 
@@ -20,6 +21,11 @@ func NewUserRepo(db *mongo.Database) *UserRepo {
 }
 
 func (r *UserRepo) CreateUser(ctx context.Context, user *models.User) (string, error) {
+	var existing models.User
+	err := r.collection.FindOne(ctx, map[string]interface{}{"email": user.Email}).Decode(&existing)
+	if err == nil {
+		return "", errors.New("email already exists")
+	}
 	user.CreatedAt = time.Now()
 	result, err := r.collection.InsertOne(ctx, user)
 	if err != nil {

@@ -23,28 +23,34 @@ func NewImageRepo(db *mongo.Database, exec resilence.Executor) *ImageRepo {
 	}
 }
 
-func (r *ImageRepo) Save(ctx context.Context, img models.Image) error {
-	return r.runMongo(ctx, func(ctx context.Context) error {
-		img.CreatedAt = time.Now()
-		img.Status = "compressed"
-		_, err := r.Collection.InsertOne(ctx, img)
-		return err
-	})
+func (r *ImageRepo) Save(ctx context.Context, image models.Image) error {
+	_, err := r.Collection.UpdateOne(
+		ctx,
+		bson.M{"requestId": image.RequestID},
+		bson.M{"$setOnInsert": bson.M{
+			"requestId":     image.RequestID,
+			"userId":        image.UserID,
+			"filename":      image.Filename,
+			"originalUrl":   image.OriginalURL,
+			"Status":        "compressed",
+			"compressedUrl": image.CompressedURL,
+			"createdAt":     time.Now(),
+		}},
+		options.Update().SetUpsert(true),
+	)
+	return err
 }
 
-// func (r *ImageRepo) UpdateProcessedURL(filename, processedURL string) error {
-// 	filter := map[string]interface{}{"filename": filename}
-
-// 	update := map[string]interface{}{
-// 		"$set": map[string]interface{}{
-// 			"processed_url": processedURL,
-// 			"status":        "completed",
-// 		},
-// 	}
-
-// 	_, err := r.Collection.UpdateOne(context.Background(), filter, update)
-// 	return err
-// }
+func (r *ImageRepo) CreateIndexes(ctx context.Context) error {
+	index := mongo.IndexModel{
+		Keys: bson.M{"requestId": 1},
+		Options: options.Index().
+			SetUnique(true).
+			SetName("uniqueRequestId"),
+	}
+	_, err := r.Collection.Indexes().CreateOne(ctx, index)
+	return err
+}
 
 func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string) ([]models.Image, int64, error) {
 	var images []models.Image
@@ -73,29 +79,21 @@ func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, use
 	return images, total, err
 }
 
-func (r *ImageRepo) CreateIndexes(ctx context.Context) error {
-	index := mongo.IndexModel{
-		Keys: bson.M{"requestId": 1},
-		Options: options.Index().
-			SetUnique(true).
-			SetName("uniqueRequestId"),
-	}
-	_, err := r.Collection.Indexes().CreateOne(ctx, index)
-	return err
-}
-
 func (r *ImageRepo) FindRequestById(ctx context.Context, requestId string) (*models.Image, error) {
 	var img models.Image
 
-	err := r.exec.Execute(ctx, func(ctx context.Context) error {
-		return r.Collection.
-			FindOne(ctx, bson.M{"request_id": requestId}).
-			Decode(&img)
-	})
+	err := r.Collection.
+		FindOne(ctx, bson.M{"requestId": requestId}).
+		Decode(&img)
 
-	if err == mongo.ErrNilDocument {
+	if err == mongo.ErrNoDocuments {
 		return nil, nil
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
 	return &img, err
 }
 

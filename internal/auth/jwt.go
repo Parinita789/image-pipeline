@@ -10,8 +10,8 @@ var secret = []byte("super-secret")
 
 func GenerateJWT(userId string) (string, error) {
 	claims := jwt.MapClaims{
-		"user_id": userId,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"userId": userId,
+		"exp":    time.Now().Add(24 * time.Hour).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
