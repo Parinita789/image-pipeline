@@ -1,14 +1,13 @@
 package middleware
 
 import (
-	"bytes"
 	"context"
+	"time"
 
 	"image-pipeline/internal/models"
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/utils"
 	"image-pipeline/pkg/response"
-	"io"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -28,48 +27,63 @@ func IdempotencyCheck(repo *repository.IdempotencyRepo) func(http.Handler) http.
 				key = uuid.New().String()
 			}
 
-			// Read body for hashing
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				response.Error(w, http.StatusInternalServerError, "failed to read request")
-				return
-			}
-			r.Body = io.NopCloser(bytes.NewReader(body))
-
 			hash := utils.HashBody(filename, int(r.ContentLength), GetUserID(r))
 
-			record, err := repo.Get(r.Context(), key)
-
+			record, acquired, err := repo.Acquire(r.Context(), key, hash)
 			if err != nil {
 				response.Error(w, http.StatusInternalServerError, "Something Went Wrong!")
 				return
 			}
 
-			if record != nil {
-				if record.RequestHash != hash {
-					response.Error(w,
-						http.StatusConflict,
-						"Idempotency key reused with different request",
-					)
-					return
-				}
-			}
-
-			if record != nil && record.Status == models.StatusCompleted {
-				response.Success(w, "Image Upload Successful!", record.Response)
-				return
-			}
-
-			if record == nil {
-				if err := repo.Create(r.Context(), key, hash); err != nil {
-					response.Error(w, http.StatusInternalServerError, "Something Went Wrong!")
+			// Not first owner of this key in the race condition - handle based on exisiting record
+			if !acquired {
+				handled := handleExistingIdempotentRecord(w, record, hash)
+				if handled {
 					return
 				}
 			}
 
 			ctx := context.WithValue(r.Context(), IdemKey, key)
 			next.ServeHTTP(w, r.WithContext(ctx))
-
 		})
 	}
+}
+
+func handleExistingIdempotentRecord(
+	w http.ResponseWriter,
+	record *models.IdempotencyRecord,
+	hash string,
+) (handled bool) {
+	if record == nil {
+		return false
+	}
+
+	if record.RequestHash != hash {
+		response.Error(
+			w,
+			http.StatusConflict,
+			"Idempotency key reused with different request",
+		)
+		return true
+	}
+
+	switch record.Status {
+	case models.StatusCompleted:
+		response.Success(w, "Image Upload Successful!", record.Response)
+		return true
+
+	case models.StatusProcessing, models.StatusStarted:
+		stuckThreshold := 1 * time.Minute
+		if time.Since(record.UpdatedAt) < stuckThreshold {
+			response.Error(w, http.StatusConflict, "request is still processing, please wait")
+			return true
+		}
+		return false
+
+	case models.StatusFailed:
+		response.Error(w, http.StatusInternalServerError, "Something Went Wrong!")
+		return false
+	}
+
+	return false
 }

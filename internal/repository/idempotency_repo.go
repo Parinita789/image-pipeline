@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"image-pipeline/internal/models"
+	"image-pipeline/internal/utils"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -35,6 +36,7 @@ func (r *IdempotencyRepo) Create(ctx context.Context, key string, hash string) e
 		RequestHash:    hash,
 		Status:         models.StatusProcessing,
 		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	_, err := r.Collection.InsertOne(ctx, record)
@@ -45,7 +47,6 @@ func (r *IdempotencyRepo) UpdateStatus(
 	ctx context.Context,
 	key string,
 	status models.Idempotencytatus,
-	// extra bson.M,
 ) error {
 
 	update := bson.M{
@@ -54,10 +55,6 @@ func (r *IdempotencyRepo) UpdateStatus(
 		},
 	}
 
-	// if extra != nil {
-	// 	update["$set"].(bson.M)["extra"] = extra
-	// }
-
 	_, err := r.Collection.UpdateOne(
 		ctx,
 		bson.M{"_id": key},
@@ -65,4 +62,33 @@ func (r *IdempotencyRepo) UpdateStatus(
 	)
 
 	return err
+}
+
+func (r *IdempotencyRepo) Acquire(
+	ctx context.Context,
+	key string,
+	hash string,
+) (*models.IdempotencyRecord, bool, error) {
+	rec, err := r.Get(ctx, key)
+	if err != nil {
+		return nil, false, err
+	}
+	if rec != nil {
+		return rec, false, nil
+	}
+
+	err = r.Create(ctx, key, hash)
+	if err != nil {
+		if utils.IsDuplicateKeyError(err) {
+			rec, err = r.Get(ctx, key)
+			return rec, false, err
+		}
+		return nil, false, err
+	}
+
+	rec, err = r.Get(ctx, key)
+	if err != nil {
+		return nil, false, err
+	}
+	return rec, true, nil
 }

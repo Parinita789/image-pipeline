@@ -3,10 +3,10 @@ package resilence
 import (
 	"context"
 	"errors"
+	"image-pipeline/internal/utils"
 	"time"
 
 	"github.com/sony/gobreaker"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
@@ -87,13 +87,9 @@ func (e *executor) Execute(ctx context.Context, fn func(ctx context.Context) err
 }
 
 func isNonRetryable(err error) bool {
-	var writeErr mongo.WriteException
-	if errors.As(err, &writeErr) {
-		for _, we := range writeErr.WriteErrors {
-			if we.Code == 11000 { // duplicate key error code
-				return true
-			}
-		}
+	// Duplicate key error
+	if utils.IsDuplicateKeyError(err) {
+		return true
 	}
 
 	// Context cancelled by caller (not timeout) — don't retry

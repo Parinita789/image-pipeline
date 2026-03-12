@@ -51,7 +51,15 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// validate content-type
-	contentType := header.Header.Get("Content-Type")
+	buf := make([]byte, 512)
+	_, err = file.Read(buf)
+	if err != nil {
+		h.logger.Error("failed to read file", zap.Error(err))
+		response.Error(w, http.StatusInternalServerError, "failed to read file")
+		return
+	}
+	contentType := http.DetectContentType(buf)
+
 	if !isAllowedType(contentType) {
 		response.Error(w, http.StatusBadRequest, "unsupported file type")
 		return
