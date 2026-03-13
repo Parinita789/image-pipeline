@@ -57,9 +57,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	userId, err := h.authSvc.Register(r.Context(), &req)
 
 	if err != nil {
-		appErr := err.(*errors.AppError)
-		log.Error("User Registration failed!", zap.Error(err))
-		response.Error(w, appErr.Code, appErr.Message)
+		if appErr, ok := err.(*errors.AppError); ok {
+			response.Error(w, appErr.Code, appErr.Message)
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -113,12 +115,18 @@ func (h *AuthHandler) JWTAuth(secret string) func(next http.Handler) http.Handle
 				response.Error(w, http.StatusUnauthorized, "Missing token")
 				return
 			}
-			token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
 				}
 				return []byte(secret), nil
 			})
+
+			if err != nil || token == nil || !token.Valid {
+				response.Error(w, http.StatusUnauthorized, "Invalid token")
+				return
+			}
+
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
 				response.Error(w, http.StatusUnauthorized, "Invalid Token Claims")

@@ -12,6 +12,7 @@ import (
 	"image-pipeline/internal/config"
 	"image-pipeline/internal/handlers"
 	applogger "image-pipeline/internal/logger"
+	"image-pipeline/internal/middleware"
 	"image-pipeline/internal/queue"
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/resilence"
@@ -22,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 type App struct {
@@ -101,6 +103,7 @@ func NewApp() *App {
 		userHandler,
 		cfg.JWTSecret,
 		idemRepo,
+		middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 10), // production
 	)
 
 	return &App{

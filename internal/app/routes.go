@@ -6,10 +6,8 @@ import (
 	"image-pipeline/internal/middleware"
 	"image-pipeline/internal/repository"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/time/rate"
 )
 
 func RegisterRoutes(
@@ -19,11 +17,11 @@ func RegisterRoutes(
 	userHandler *handlers.UserHandler,
 	jwtSecret string,
 	idemRepo *repository.IdempotencyRepo,
+	rateLimiter *middleware.RateLimiter,
 ) {
-	rateLimiterMiddleware := middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 10)
 	// Global middleware
 	router.Use(middleware.RequestID)
-	router.Use(rateLimiterMiddleware.RateLimit)
+	router.Use(rateLimiter.RateLimit)
 	router.Use(middleware.Logger)
 
 	// healthcheck api

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/models"
@@ -50,7 +51,10 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (strin
 	}
 	result, err := s.UserRepo.CreateUser(ctx, &user)
 	if err != nil {
-		return "", err
+		if strings.Contains(err.Error(), "email already exists") {
+			return "", errors.New("email already exists")
+		}
+		return "", errors.New("registration failed")
 	}
 	return result, nil
 }
@@ -67,7 +71,7 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, err
 		log.Info("Failed login attempt", zap.String("email", req.Email))
 		return "", errors.New("invalid credentials")
 	}
-	token, _ := GenerateJWT(user.ID.Hex())
+	token, _ := GenerateJWT(user.ID.Hex(), s.jwtSecret)
 
 	return token, nil
 }
