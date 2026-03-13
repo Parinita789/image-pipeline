@@ -43,6 +43,23 @@ func NewS3Client(region string, bucket string) (*S3Client, error) {
 	}, nil
 }
 
+// NewS3ClientFromConfig accepts an existing config — for tests
+func NewS3ClientFromConfig(cfg aws.Config, bucket string) *S3Client {
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
+	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
+		u.PartSize = 5 * 1024 * 1024
+		u.Concurrency = 3
+		u.BufferProvider = manager.NewBufferedReadSeekerWriteToPool(25 * 1024 * 1024)
+	})
+	return &S3Client{
+		S3:       client,
+		Bucket:   bucket,
+		Uploader: uploader,
+	}
+}
+
 // UploadStream - streams directly from reader, never loads full file into RAM
 func (s *S3Client) UploadStream(
 	parentCtx context.Context,
@@ -114,4 +131,15 @@ func (c *S3Client) DeleteObject(ctx context.Context, key string) error {
 	})
 
 	return err
+}
+
+func (c *S3Client) ObjectExists(ctx context.Context, prefix string) (bool, error) {
+	out, err := c.S3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(c.Bucket),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(out.Contents) > 0, nil
 }

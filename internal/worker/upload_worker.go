@@ -9,6 +9,7 @@ import (
 	"image-pipeline/internal/repository"
 	"image-pipeline/internal/s3"
 	"image-pipeline/internal/services"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
@@ -23,6 +24,7 @@ type Worker struct {
 	logger       *zap.Logger
 	workerCount  int
 	jobChan      chan types.Message
+	wg           sync.WaitGroup
 }
 
 func NewWorker(
@@ -45,21 +47,42 @@ func NewWorker(
 func (w *Worker) StartWorker(ctx context.Context) {
 	// start worker
 	for i := 0; i < w.workerCount; i++ {
-		go w.workerLoop(ctx, i)
+		w.wg.Add(1)
+		go func(id int) {
+			defer w.wg.Done()
+			w.workerLoop(ctx, id)
+		}(i)
 	}
 
-	// polling loop
-	for {
-		messages, err := w.sqs.ReceiveMessage(ctx)
-		if err != nil {
-			w.logger.Error("failed to receive messages", zap.Error(err))
-			continue
-		}
-		w.logger.Info("messages received", zap.Int("count", len(messages)))
+	// polling loop feeds jobChan
+	w.pollSQS(ctx)
+	close(w.jobChan)
+}
 
-		for _, msg := range messages {
-			w.logger.Info("processing message")
-			w.jobChan <- msg
+func (w *Worker) pollSQS(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			w.logger.Info("polling stopped")
+			return
+		default:
+			msgs, err := w.sqs.ReceiveMessage(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				w.logger.Error("sqs receive failed", zap.Error(err))
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			for _, msg := range msgs {
+				select {
+				case w.jobChan <- msg:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
 	}
 }
@@ -95,6 +118,9 @@ func (w *Worker) workerLoop(ctx context.Context, id int) {
 		if err != nil {
 			jobLog.Error("delete message failed", zap.Error(err))
 		}
-
 	}
+}
+
+func (w *Worker) Wait() {
+	w.wg.Wait()
 }

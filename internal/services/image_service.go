@@ -7,25 +7,48 @@ import (
 	"image"
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/models"
-	"image-pipeline/internal/queue"
-	db "image-pipeline/internal/repository"
 	"image-pipeline/internal/resilence"
-	s3client "image-pipeline/internal/s3"
 	"image/jpeg"
 	_ "image/jpeg"
 	"image/png"
 	_ "image/png"
 	"io"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
 )
 
+type IIdempotencyRepo interface {
+	Get(ctx context.Context, key string) (*models.IdempotencyRecord, error)
+	UpdateStatus(ctx context.Context, key string, status models.IdempotencyStatus) error
+	Acquire(ctx context.Context, key, hash string) (*models.IdempotencyRecord, bool, error)
+}
+
+type IImageRepo interface {
+	Save(ctx context.Context, image models.Image) error
+	FindRequestById(ctx context.Context, requestId string) (*models.Image, error)
+	GetPaginatedImages(ctx context.Context, page, limit int, userId string) ([]models.Image, int64, error)
+	DeleteImage(ctx context.Context, id string) (*models.Image, error)
+	UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error)
+}
+
+type IS3Client interface {
+	UploadStream(ctx context.Context, key string, body io.Reader) (string, error)
+	DownloadStream(ctx context.Context, key string) (io.ReadCloser, error)
+	CopyObject(ctx context.Context, srcKey, dstKey string) (string, error)
+	DeleteObject(ctx context.Context, key string) error
+}
+
+type ISQSClient interface {
+	PublishUpload(ctx context.Context, msg models.UploadMessage) error
+}
+
 type ImageService struct {
-	ImageRepo *db.ImageRepo
-	IdemRepo  *db.IdempotencyRepo
-	S3        *s3client.S3Client
+	ImageRepo IImageRepo
+	IdemRepo  IIdempotencyRepo
+	S3        IS3Client
 	s3Exec    resilence.Executor
-	sqsQueue  *queue.SQSClient
+	sqsQueue  ISQSClient
 	sqsExec   resilence.Executor
 }
 
@@ -37,11 +60,11 @@ type PaginatedResponse struct {
 }
 
 func NewImageService(
-	repo *db.ImageRepo,
-	idemRepo *db.IdempotencyRepo,
-	s3 *s3client.S3Client,
+	repo IImageRepo,
+	idemRepo IIdempotencyRepo,
+	s3 IS3Client,
 	s3Exec resilence.Executor,
-	sqsQueue *queue.SQSClient,
+	sqsQueue ISQSClient,
 	sqsExec resilence.Executor,
 ) *ImageService {
 	return &ImageService{
@@ -63,7 +86,7 @@ func (s *ImageService) EnqueueUpload(
 	body io.Reader,
 ) error {
 	log := logger.FromContext(ctx)
-	tempKey := fmt.Sprintf("tmp/%s/%s/%s_%s", userId, requestId, filename)
+	tempKey := fmt.Sprintf("tmp/%s/%s/%s", userId, requestId, filename)
 	log.Info("S3 temp Key", zap.String("s3TempKey", tempKey))
 
 	_, err := s.S3.UploadStream(ctx, tempKey, body)

@@ -31,6 +31,14 @@ func NewSQSClient(queueURL string) (*SQSClient, error) {
 	}, nil
 }
 
+// NewSQSClientFromConfig accepts an existing config — for tests
+func NewSQSClientFromConfig(cfg aws.Config, queueURL string) *SQSClient {
+	return &SQSClient{
+		Client:   sqs.NewFromConfig(cfg),
+		QueueURL: queueURL,
+	}
+}
+
 func (s *SQSClient) DeleteMessage(
 	ctx context.Context,
 	receiptHandle string,

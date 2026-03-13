@@ -6,11 +6,15 @@ import (
 
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/models"
-	db "image-pipeline/internal/repository"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
+
+type IUserRepo interface {
+	CreateUser(ctx context.Context, user *models.User) (string, error)
+	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
+}
 
 type RegisterRequest struct {
 	FirstName string
@@ -25,11 +29,11 @@ type LoginRequest struct {
 }
 
 type AuthService struct {
-	UserRepo  *db.UserRepo
+	UserRepo  IUserRepo
 	jwtSecret string
 }
 
-func NewAuthService(userRepo *db.UserRepo, secret string) *AuthService {
+func NewAuthService(userRepo IUserRepo, secret string) *AuthService {
 	return &AuthService{
 		UserRepo:  userRepo,
 		jwtSecret: secret,

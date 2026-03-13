@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"image-pipeline/internal/auth"
@@ -17,12 +20,14 @@ import (
 	"image-pipeline/internal/services"
 
 	"github.com/go-chi/chi/v5"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
 type App struct {
-	router *chi.Mux
-	logger *zap.Logger
+	router      *chi.Mux
+	logger      *zap.Logger
+	mongoClient *mongo.Client
 }
 
 func NewApp() *App {
@@ -35,7 +40,7 @@ func NewApp() *App {
 	}
 
 	// Connect MongoDB
-	db, _ := repository.Connect(cfg.MongoURI)
+	mongoClient, db, err := repository.Connect(cfg.MongoURI)
 	if err != nil {
 		log.Fatal("Mongo connection failed", zap.Error(err))
 	}
@@ -44,6 +49,11 @@ func NewApp() *App {
 	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
 	if err != nil {
 		log.Fatal("S3 connection failed", zap.Error(err))
+	}
+	// Create SQS client
+	SQSClient, _ := queue.NewSQSClient(cfg.SQSQueueURL)
+	if err != nil {
+		log.Fatal("SQS connection failed", zap.Error(err))
 	}
 
 	// Create Resilience Executors
@@ -54,13 +64,9 @@ func NewApp() *App {
 	// Repository Layer
 	imageRepo := repository.NewImageRepo(db, mongoExec)
 	imageRepo.CreateIndexes(context.Background())
-
 	idemRepo := repository.NewIdemRepo(db)
-
 	userRepo := repository.NewUserRepo(db)
 
-	// Create SQS client
-	SQSClient, _ := queue.NewSQSClient(cfg.SQSQueueURL)
 	// Service Layer
 	imageService := services.NewImageService(
 		imageRepo,
@@ -98,12 +104,48 @@ func NewApp() *App {
 	)
 
 	return &App{
-		router: router,
-		logger: log,
+		router:      router,
+		logger:      log,
+		mongoClient: mongoClient,
 	}
 }
 
 func (a *App) Run() {
-	a.logger.Info("Server running on :8080")
-	http.ListenAndServe(":8080", a.router)
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: a.router,
+	}
+
+	go func() {
+		a.logger.Info("server starting", zap.String("addr", srv.Addr))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			a.logger.Fatal("server error", zap.Error(err))
+		}
+	}()
+
+	// block until OS signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-quit
+	a.logger.Info("shutdown signal received", zap.String("signal", sig.String()))
+
+	// in-flight requests 30s to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		a.logger.Error("server forced to shutdown", zap.Error(err))
+	}
+	a.logger.Info("http server stopped")
+
+	// close MongoDB after requests are drained
+	if err := a.mongoClient.Disconnect(ctx); err != nil {
+		a.logger.Error("mongo disconnect error", zap.Error(err))
+	}
+
+	a.logger.Info("mongo disconnected")
+
+	// flush logger
+	a.logger.Info("shutdown complete")
+	a.logger.Sync()
 }

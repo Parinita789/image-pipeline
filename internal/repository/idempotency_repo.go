@@ -46,7 +46,7 @@ func (r *IdempotencyRepo) Create(ctx context.Context, key string, hash string) e
 func (r *IdempotencyRepo) UpdateStatus(
 	ctx context.Context,
 	key string,
-	status models.Idempotencytatus,
+	status models.IdempotencyStatus,
 ) error {
 
 	update := bson.M{

@@ -81,8 +81,8 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, "upload started!", map[string]string{
-		"status":     "processing",
-		"request_id": requestId,
+		"status":    "processing",
+		"requestId": requestId,
 	})
 }
 
