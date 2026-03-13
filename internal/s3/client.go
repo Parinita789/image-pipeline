@@ -6,6 +6,7 @@ import (
 	"image-pipeline/internal/logger"
 	"io"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,13 +23,28 @@ type S3Client struct {
 }
 
 func NewS3Client(region string, bucket string) (*S3Client, error) {
+	// using localstack
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion(region),
+	}
+
+	if endpoint := os.Getenv("AWS_ENDPOINT_URL"); endpoint != "" {
+		opts = append(opts, config.WithEndpointResolverWithOptions(
+			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+				return aws.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
+			}),
+		))
+	}
+
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 
 	if err != nil {
 		return nil, err
 	}
 
-	client := s3.NewFromConfig(cfg)
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
 
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
 		u.PartSize = 5 * 1024 * 1024 // 5MB per part

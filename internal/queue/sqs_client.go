@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image-pipeline/internal/models"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -17,6 +18,17 @@ type SQSClient struct {
 }
 
 func NewSQSClient(queueURL string) (*SQSClient, error) {
+	// using localstack
+	opts := []func(*config.LoadOptions) error{}
+
+	if endpoint := os.Getenv("AWS_ENDPOINT_URL"); endpoint != "" {
+		opts = append(opts, config.WithEndpointResolverWithOptions(
+			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+				return aws.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
+			}),
+		))
+	}
+
 	cfg, err := config.LoadDefaultConfig(context.Background())
 
 	if err != nil {

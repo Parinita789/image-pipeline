@@ -1,2 +1,4 @@
 # image-pipeline
 .env
+.env.*
+!.env.docker

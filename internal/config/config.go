@@ -1,7 +1,6 @@
 package config
 
 import (
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -19,10 +18,7 @@ type Config struct {
 }
 
 func LoadConfig() (*Config, error) {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(" Error loading .env file")
-	}
+	_ = godotenv.Load()
 
 	cfg := &Config{
 		AWSRegion:   os.Getenv("AWS_REGION"),
@@ -35,5 +31,5 @@ func LoadConfig() (*Config, error) {
 		WorkerCount: 5,
 	}
 
-	return cfg, err
+	return cfg, nil
 }

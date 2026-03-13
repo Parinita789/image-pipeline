@@ -5,6 +5,7 @@ import (
 	"image-pipeline/internal/handlers"
 	"image-pipeline/internal/middleware"
 	"image-pipeline/internal/repository"
+	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,6 +25,11 @@ func RegisterRoutes(
 	router.Use(middleware.RequestID)
 	router.Use(rateLimiterMiddleware.RateLimit)
 	router.Use(middleware.Logger)
+
+	// healthcheck api
+	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 
 	// Public auth routes
 	router.Route("/auth", func(r chi.Router) {
