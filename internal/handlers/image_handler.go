@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"encoding/json"
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/middleware"
+	"image-pipeline/internal/models"
 	"image-pipeline/internal/services"
 	"image-pipeline/pkg/response"
 	"net/http"
@@ -101,6 +101,8 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 	log.Info("fetching images...")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	search := r.URL.Query().Get("search")
+	status := r.URL.Query().Get("status")
 
 	if page == 0 {
 		page = 1
@@ -110,21 +112,25 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 		limit = 10
 	}
 
+	if limit > 100 {
+		limit = 100
+	}
+
 	userId := middleware.GetUserID(r)
 
-	paginatedResponse, err := h.Service.GetImages(ctx, page, limit, userId)
+	filters := models.ImageFilters{
+		Search: search,
+		Status: status,
+	}
+
+	paginatedResponse, err := h.Service.GetImages(ctx, page, limit, userId, filters)
 	if err != nil {
 		log.Error("Failed to get images", zap.Error(err))
 		http.Error(w, "Failed to get images", http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"images": paginatedResponse.Images,
-		"total":  paginatedResponse.Total,
-		"page":   paginatedResponse.Page,
-		"limit":  paginatedResponse.Limit,
-	})
+	response.Success(w, "images fetched successfully", paginatedResponse)
 }
 
 func (h *ImageHandler) DeleteImage(w http.ResponseWriter, r *http.Request) {

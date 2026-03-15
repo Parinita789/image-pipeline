@@ -14,7 +14,7 @@ func RegisterRoutes(
 	router *chi.Mux,
 	auth *auth.AuthHandler,
 	imageHandler *handlers.ImageHandler,
-	userHandler *handlers.UserHandler,
+	// userHandler *handlers.UserHandler,
 	jwtSecret string,
 	idemRepo *repository.IdempotencyRepo,
 	rateLimiter *middleware.RateLimiter,

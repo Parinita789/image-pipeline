@@ -24,9 +24,9 @@ type UserService struct {
 	logger    *zap.Logger
 }
 
-func NewUserService(userRepo *db.UserRepo, secret string) *UserService {
-	return &UserService{
-		UserRepo:  userRepo,
-		jwtSecret: secret,
-	}
-}
+// func NewUserService(userRepo *db.UserRepo, secret string) *UserService {
+// 	return &UserService{
+// 		UserRepo:  userRepo,
+// 		jwtSecret: secret,
+// 	}
+// }

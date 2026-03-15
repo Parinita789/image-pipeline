@@ -77,6 +77,7 @@ func NewApp() *App {
 		s3Exec,
 		SQSClient,
 		sqsExec,
+		cfg.CloudFrontDomain,
 	)
 
 	authService := auth.NewAuthService(
@@ -84,15 +85,15 @@ func NewApp() *App {
 		cfg.JWTSecret,
 	)
 
-	userService := services.NewUserService(
-		userRepo,
-		cfg.JWTSecret,
-	)
+	// userService := services.NewUserService(
+	// 	userRepo,
+	// 	cfg.JWTSecret,
+	// )
 
 	// Handler Layer
 	authHandler := auth.NewAuthHandler(authService)
 	imageHandler := handlers.NewImageHandler(imageService)
-	userHandler := handlers.NewUserHandler(userService)
+	// userHandler := handlers.NewUserHandler(userService)
 
 	// Router Setup
 	router := chi.NewRouter()
@@ -100,7 +101,7 @@ func NewApp() *App {
 		router,
 		authHandler,
 		imageHandler,
-		userHandler,
+		// userHandler,
 		cfg.JWTSecret,
 		idemRepo,
 		middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 10), // production

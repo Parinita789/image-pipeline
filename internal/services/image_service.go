@@ -13,6 +13,7 @@ import (
 	"image/png"
 	_ "image/png"
 	"io"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
@@ -27,7 +28,7 @@ type IIdempotencyRepo interface {
 type IImageRepo interface {
 	Save(ctx context.Context, image models.Image) error
 	FindRequestById(ctx context.Context, requestId string) (*models.Image, error)
-	GetPaginatedImages(ctx context.Context, page, limit int, userId string) ([]models.Image, int64, error)
+	GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
 	DeleteImage(ctx context.Context, id string) (*models.Image, error)
 	UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error)
 }
@@ -50,6 +51,7 @@ type ImageService struct {
 	s3Exec    resilence.Executor
 	sqsQueue  ISQSClient
 	sqsExec   resilence.Executor
+	cdnDomain string
 }
 
 type PaginatedResponse struct {
@@ -66,6 +68,7 @@ func NewImageService(
 	s3Exec resilence.Executor,
 	sqsQueue ISQSClient,
 	sqsExec resilence.Executor,
+	cdnDomain string,
 ) *ImageService {
 	return &ImageService{
 		ImageRepo: repo,
@@ -74,6 +77,7 @@ func NewImageService(
 		s3Exec:    s3Exec,
 		sqsQueue:  sqsQueue,
 		sqsExec:   sqsExec,
+		cdnDomain: cdnDomain,
 	}
 }
 
@@ -200,9 +204,11 @@ func (s *ImageService) ProcessUpload(
 		log.Error("compressed upload failed", zap.Error(err))
 		return err
 	}
+	// save the CloudFront url before saving to DB
+	cdnUrl := s.toCDNUrl(compressedUrl)
 
 	// save metadata
-	err = s.SaveMetaData(ctx, idemKey, msg.UserId, msg.FileName, rawUrl, compressedUrl)
+	err = s.SaveMetaData(ctx, idemKey, msg.UserId, msg.FileName, rawUrl, cdnUrl)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
 		log.Error("Error while saving image record in db", zap.Error(err))
@@ -355,8 +361,9 @@ func (s *ImageService) GetImages(
 	page int,
 	limit int,
 	userId string,
+	filters models.ImageFilters,
 ) (*PaginatedResponse, error) {
-	images, total, err := s.ImageRepo.GetPaginatedImages(ctx, page, limit, userId)
+	images, total, err := s.ImageRepo.GetPaginatedImages(ctx, page, limit, userId, filters)
 	if err != nil {
 		return nil, err
 	}
@@ -390,4 +397,22 @@ func (s *ImageService) DeleteImage(ctx context.Context, id string) error {
 	return s.s3Exec.Execute(ctx, func(ctx context.Context) error {
 		return s.S3.DeleteObject(ctx, img.CompressedURL)
 	})
+}
+
+func (s *ImageService) toCDNUrl(s3Url string) string {
+	fmt.Print("toCDNUrl",
+		zap.String("domain", s.cdnDomain),
+		zap.String("s3Url", s3Url),
+		zap.Int("parts", len(strings.SplitN(s3Url, ".amazonaws.com/", 2))),
+	)
+
+	if s.cdnDomain == "" {
+		return s3Url
+	}
+
+	parts := strings.SplitN(s3Url, ".amazonaws.com/", 2)
+	if len(parts) != 2 {
+		return s3Url
+	}
+	return fmt.Sprintf("https://%s/%s", s.cdnDomain, parts[1])
 }

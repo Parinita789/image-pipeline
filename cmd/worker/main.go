@@ -66,6 +66,7 @@ func main() {
 		s3Exec,
 		SQSClient,
 		sqsExec,
+		cfg.CloudFrontDomain,
 	)
 
 	// Worker

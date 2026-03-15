@@ -52,12 +52,21 @@ func (r *ImageRepo) CreateIndexes(ctx context.Context) error {
 	return err
 }
 
-func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string) ([]models.Image, int64, error) {
+func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
 	var images []models.Image
 	var total int64
 
 	err := r.runMongo(ctx, func(ctx context.Context) error {
 		filter := bson.M{"userId": userId}
+
+		// filename search — case insensitive partial match
+		if filters.Search != "" {
+			filter["filename"] = bson.M{"$regex": filters.Search, "$options": "i"}
+		}
+
+		if filters.Status != "" {
+			filter["Status"] = filters.Status
+		}
 
 		count, err := r.Collection.CountDocuments(ctx, filter)
 		if err != nil {
