@@ -86,6 +86,9 @@ func (m *mockImageRepo) FindRequestById(ctx context.Context, requestId string) (
 	}
 	return nil, nil
 }
+func (m *mockImageRepo) DeleteManyImages(ctx context.Context, ids []string, userId string) ([]models.Image, error) {
+	return nil, nil
+}
 
 type mockS3Client struct {
 	uploadStreamFn     func(ctx context.Context, key string, body io.Reader) (string, error)
@@ -131,6 +134,9 @@ func (m *mockS3Client) ObjectURL(key string) string {
 		return m.objectURLFn(key)
 	}
 	return "https://test-bucket.s3.amazonaws.com/" + key
+}
+func (m *mockS3Client) DeleteObjects(ctx context.Context, keys []string) ([]string, error) {
+	return nil, nil
 }
 
 type mockSQSClient struct {

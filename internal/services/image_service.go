@@ -3,12 +3,13 @@ package services
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"image"
 	"image-pipeline/internal/logger"
+	"image-pipeline/internal/metrics"
 	"image-pipeline/internal/models"
 	"image-pipeline/internal/resilence"
+	apperr "image-pipeline/pkg/errors"
 	"image/jpeg"
 	_ "image/jpeg"
 	"image/png"
@@ -20,11 +21,6 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
-)
-
-var (
-	ErrImageNotFound = errors.New("image not found")
-	ErrUnauthorized  = errors.New("unauthorized!")
 )
 
 type IIdempotencyRepo interface {
@@ -115,15 +111,15 @@ func NewImageService(
 	}
 }
 
-// PrepareUpload generates presigned S3 PUT URLs for each file.
-// No file bytes touch the API server — the client uploads directly to S3.
 func (s *ImageService) PrepareUpload(ctx context.Context, userId string, files []PrepareFile) ([]PreparedUpload, error) {
+	log := logger.FromContext(ctx)
 	result := make([]PreparedUpload, 0, len(files))
 	for _, f := range files {
 		requestId := uuid.New().String()
 		key := fmt.Sprintf("raw/%s/%s_%s", userId, requestId, f.Filename)
 		url, err := s.S3.PresignPutObject(ctx, key, f.ContentType, f.Size, 15*time.Minute)
 		if err != nil {
+			log.Error("failed to generate presignedUrl", zap.Error(err))
 			return nil, fmt.Errorf("presign %s: %w", f.Filename, err)
 		}
 		result = append(result, PreparedUpload{
@@ -136,9 +132,8 @@ func (s *ImageService) PrepareUpload(ctx context.Context, userId string, files [
 	return result, nil
 }
 
-// ConfirmUpload is called after the client has PUT all files directly to S3.
-// It publishes an SQS message per file so the worker can compress and save metadata.
 func (s *ImageService) ConfirmUpload(ctx context.Context, userId, idemKey string, files []ConfirmFile) (int, error) {
+	log := logger.FromContext(ctx)
 	enqueued := 0
 	for i, f := range files {
 		fileIdemKey := fmt.Sprintf("%s-%d", idemKey, i)
@@ -150,9 +145,12 @@ func (s *ImageService) ConfirmUpload(ctx context.Context, userId, idemKey string
 			RawS3Key:       f.Key,
 		}
 		if err := s.publishToSQS(ctx, msg); err != nil {
+			log.Error("failed to publish msg to sqs", zap.Error(err))
+			metrics.UploadErrorsTotal.WithLabelValues("sqs").Inc()
 			return enqueued, err
 		}
 		enqueued++
+		metrics.UploadEnqueuedTotal.Inc()
 	}
 	return enqueued, nil
 }
@@ -163,9 +161,8 @@ func (s *ImageService) publishToSQS(ctx context.Context, msg models.UploadMessag
 	})
 }
 
-// ProcessUpload is called by the worker. The file is already at msg.RawS3Key —
-// no copy step needed. Worker: download → compress → upload compressed → save metadata.
 func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessage) error {
+	start := time.Now()
 	log := logger.FromContext(ctx)
 	idemKey := msg.IdempotencyKey
 
@@ -197,14 +194,23 @@ func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessa
 	rawData, err := s.downloadBytesFromS3(ctx, rawKey)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
 		log.Error("failed to download raw image", zap.Error(err))
 		return err
 	}
 
+	metrics.ImageSizeBytes.Observe(float64(len(rawData)))
+
 	compressedData, err := s.CompressImage(rawData)
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
 		return err
+	}
+
+	if len(rawData) > 0 {
+		ratio := float64(len(compressedData)) / float64(len(rawData))
+		metrics.CompressionRatio.Observe(ratio)
 	}
 
 	compressedKey := fmt.Sprintf("compressed/%s/%s_%s", msg.UserId, idemKey, msg.FileName)
@@ -213,6 +219,7 @@ func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessa
 	compressedUrl, err := s.UploadToS3(ctx, compressedKey, compressedData, "compressed")
 	if err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
 		log.Error("compressed upload failed", zap.Error(err))
 		return err
 	}
@@ -221,6 +228,7 @@ func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessa
 
 	if err = s.SaveMetaData(ctx, idemKey, msg.UserId, msg.FileName, rawUrl, cdnUrl); err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
 		log.Error("failed to save metadata", zap.Error(err))
 		return err
 	}
@@ -228,6 +236,9 @@ func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessa
 	if err = s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusCompleted); err != nil {
 		log.Error("failed to mark completed — requires manual reconciliation", zap.Error(err))
 	}
+
+	metrics.WorkerJobsTotal.WithLabelValues("completed").Inc()
+	metrics.WorkerJobDurationSeconds.Observe(time.Since(start).Seconds())
 
 	log.Info("upload pipeline completed",
 		zap.String("raw_url", rawUrl),
@@ -323,14 +334,14 @@ func (s *ImageService) DeleteImage(ctx context.Context, id string, userId string
 		return err
 	}
 	if img == nil || img.ID.IsZero() {
-		return ErrImageNotFound
+		return apperr.ErrImageNotFound
 	}
 
 	rawKey := extractS3Key(img.OriginalURL)
 	compressedKey := extractS3Key(img.CompressedURL)
 
 	if img.UserID != userId {
-		return ErrUnauthorized
+		return apperr.ErrImageForbidden
 	}
 
 	if rawKey != "" {
@@ -379,14 +390,12 @@ func (s *ImageService) BatchDeleteImages(ctx context.Context, ids []string, user
 		}
 	}
 
-	// One S3 API call deletes up to 1000 keys.
 	var failedKeys []string
 	if len(keys) > 0 {
 		failedKeys, err = s.S3.DeleteObjects(ctx, keys)
 		if err != nil {
 			log.Error("s3 batch delete failed", zap.Error(err))
 			// MongoDB records are already gone — log and continue; orphaned S3 objects
-			// are a cost concern, not a correctness issue.
 		}
 		if len(failedKeys) > 0 {
 			log.Warn("some s3 keys failed to delete", zap.Strings("keys", failedKeys))

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	apperr "image-pipeline/pkg/errors"
 	"image-pipeline/pkg/response"
 	"net/http"
 	"sync"
@@ -45,7 +46,7 @@ func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
 		}
 
 		if !rl.getLimiter(key).Allow() {
-			response.Error(w, http.StatusMethodNotAllowed, "Too many requests")
+			response.AppError(w, apperr.ErrTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)

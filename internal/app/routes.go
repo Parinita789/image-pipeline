@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func RegisterRoutes(
@@ -28,10 +29,13 @@ func RegisterRoutes(
 	router.Use(middleware.RequestID)
 	router.Use(rateLimiter.RateLimit)
 	router.Use(middleware.Logger)
+	router.Use(middleware.PrometheusMiddleware)
 
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	router.Handle("/metrics", promhttp.Handler())
 
 	router.Route("/auth", func(r chi.Router) {
 		r.Post("/register", auth.Register)

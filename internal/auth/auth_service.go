@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"strings"
+	"time"
 
 	"image-pipeline/internal/logger"
+	"image-pipeline/internal/metrics"
 	"image-pipeline/internal/models"
+	apperr "image-pipeline/pkg/errors"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -52,26 +54,34 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (strin
 	result, err := s.UserRepo.CreateUser(ctx, &user)
 	if err != nil {
 		if strings.Contains(err.Error(), "email already exists") {
-			return "", errors.New("email already exists")
+			metrics.AuthRegistrationsTotal.WithLabelValues("duplicateEmail").Inc()
+			return "", apperr.ErrEmailExists
 		}
-		return "", errors.New("registration failed")
+		metrics.AuthRegistrationsTotal.WithLabelValues("failed").Inc()
+		return "", apperr.ErrRegistrationFailed
 	}
+	metrics.AuthRegistrationsTotal.WithLabelValues("success").Inc()
 	return result, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, error) {
+	start := time.Now()
 	log := logger.FromContext(ctx)
 	user, err := s.UserRepo.GetUserByEmail(ctx, req.Email)
 	if err != nil || user == nil {
-		return "", errors.New("invalid email or password")
+		metrics.AuthLoginsTotal.WithLabelValues("notNound").Inc()
+		return "", apperr.ErrInvalidCredentials
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
+	metrics.AuthLoginDurationSeconds.Observe(time.Since(start).Seconds())
+
 	if err != nil {
 		log.Info("Failed login attempt", zap.String("email", req.Email))
-		return "", errors.New("invalid credentials")
+		metrics.AuthLoginsTotal.WithLabelValues("invalidCredentials").Inc()
+		return "", apperr.ErrInvalidCredentials
 	}
 	token, _ := GenerateJWT(user.ID.Hex(), user.FirstName, s.jwtSecret)
-
+	metrics.AuthLoginsTotal.WithLabelValues("success").Inc()
 	return token, nil
 }

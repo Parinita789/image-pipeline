@@ -7,6 +7,7 @@ import (
 	"image-pipeline/internal/middleware"
 	"image-pipeline/internal/models"
 	"image-pipeline/internal/services"
+	apperr "image-pipeline/pkg/errors"
 	"image-pipeline/pkg/response"
 	"net/http"
 	"strconv"
@@ -42,26 +43,26 @@ func (h *ImageHandler) PrepareUpload(w http.ResponseWriter, r *http.Request) {
 		} `json:"files"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid request body")
+		response.AppError(w, apperr.ErrInvalidJSON)
 		return
 	}
 
 	if len(req.Files) == 0 {
-		response.Error(w, http.StatusBadRequest, "no files provided")
+		response.AppError(w, apperr.ErrNoFilesProvided)
 		return
 	}
 	if len(req.Files) > maxFiles {
-		response.Error(w, http.StatusBadRequest, fmt.Sprintf("too many files — max %d allowed", maxFiles))
+		response.AppError(w, apperr.ErrTooManyFiles.Withf(maxFiles))
 		return
 	}
 
 	for _, f := range req.Files {
 		if f.Size > maxFileSize {
-			response.Error(w, http.StatusBadRequest, fmt.Sprintf("%s exceeds max file size (100MB)", f.Filename))
+			response.AppError(w, apperr.ErrFileTooLarge.Withf(f.Filename))
 			return
 		}
 		if !isAllowedType(f.ContentType) {
-			response.Error(w, http.StatusBadRequest, fmt.Sprintf("%s: unsupported type — allowed: jpeg, png, webp", f.Filename))
+			response.AppError(w, apperr.ErrUnsupportedType.Withf(f.Filename))
 			return
 		}
 	}
@@ -80,7 +81,7 @@ func (h *ImageHandler) PrepareUpload(w http.ResponseWriter, r *http.Request) {
 	prepared, err := h.Service.PrepareUpload(ctx, userId, prepareFiles)
 	if err != nil {
 		log.Error("failed to prepare upload", zap.Error(err), zap.String("userId", userId))
-		response.Error(w, http.StatusInternalServerError, "failed to prepare upload")
+		response.AppError(w, apperr.ErrPrepareFailed)
 		return
 	}
 
@@ -94,7 +95,7 @@ func (h *ImageHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
 	idemKey := r.Header.Get("X-Idempotency-Key")
 
 	if idemKey == "" {
-		response.Error(w, http.StatusBadRequest, "missing X-Idempotency-Key")
+		response.AppError(w, apperr.ErrMissingIdemKey)
 		return
 	}
 
@@ -106,12 +107,12 @@ func (h *ImageHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
 		} `json:"files"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid request body")
+		response.AppError(w, apperr.ErrInvalidJSON)
 		return
 	}
 
 	if len(req.Files) == 0 {
-		response.Error(w, http.StatusBadRequest, "no files to confirm")
+		response.AppError(w, apperr.ErrNoFilesToConfirm)
 		return
 	}
 
@@ -133,7 +134,7 @@ func (h *ImageHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
 	enqueued, err := h.Service.ConfirmUpload(ctx, userId, idemKey, confirmFiles)
 	if err != nil {
 		log.Error("failed to confirm upload", zap.Error(err), zap.String("idemKey", idemKey))
-		response.Error(w, http.StatusInternalServerError, "failed to enqueue uploads")
+		response.AppError(w, apperr.ErrEnqueueFailed)
 		return
 	}
 
@@ -170,7 +171,7 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 	paginatedResponse, err := h.Service.GetImages(ctx, page, limit, userId, filters)
 	if err != nil {
 		log.Error("failed to get images", zap.Error(err))
-		response.Error(w, http.StatusInternalServerError, "failed to get images")
+		response.AppError(w, apperr.ErrImageFetchFailed)
 		return
 	}
 
@@ -183,18 +184,18 @@ func (h *ImageHandler) GetImageByRequestId(w http.ResponseWriter, r *http.Reques
 
 	requestId := chi.URLParam(r, "requestId")
 	if requestId == "" {
-		response.Error(w, http.StatusBadRequest, "missing requestId")
+		response.AppError(w, apperr.ErrMissingRequestID)
 		return
 	}
 
 	img, err := h.Service.GetImageByRequestId(ctx, requestId)
 	if err != nil {
 		log.Error("failed to get image", zap.Error(err))
-		response.Error(w, http.StatusInternalServerError, "failed to get image")
+		response.AppError(w, apperr.ErrImageFetchFailed)
 		return
 	}
 	if img == nil {
-		response.Error(w, http.StatusNotFound, "image not found")
+		response.AppError(w, apperr.ErrImageNotFound)
 		return
 	}
 
@@ -211,16 +212,8 @@ func (h *ImageHandler) DeleteImage(w http.ResponseWriter, r *http.Request) {
 
 	err := h.Service.DeleteImage(ctx, id, userId)
 	if err != nil {
-		if err == services.ErrImageNotFound {
-			response.Error(w, http.StatusNotFound, "image not found")
-			return
-		}
-		if err == services.ErrUnauthorized {
-			response.Error(w, http.StatusForbidden, "you do not own this image")
-			return
-		}
 		log.Error("failed to delete image", zap.Error(err))
-		response.Error(w, http.StatusInternalServerError, "failed to delete image")
+		response.HandleError(w, err)
 		return
 	}
 
@@ -236,15 +229,15 @@ func (h *ImageHandler) BatchDeleteImages(w http.ResponseWriter, r *http.Request)
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid request body")
+		response.AppError(w, apperr.ErrInvalidJSON)
 		return
 	}
 	if len(req.IDs) == 0 {
-		response.Error(w, http.StatusBadRequest, "no ids provided")
+		response.AppError(w, apperr.ErrNoIDsProvided)
 		return
 	}
 	if len(req.IDs) > 50 {
-		response.Error(w, http.StatusBadRequest, "too many ids — max 50 per request")
+		response.AppError(w, apperr.ErrTooManyIDs)
 		return
 	}
 
@@ -253,7 +246,7 @@ func (h *ImageHandler) BatchDeleteImages(w http.ResponseWriter, r *http.Request)
 	result, err := h.Service.BatchDeleteImages(ctx, req.IDs, userId)
 	if err != nil {
 		log.Error("batch delete failed", zap.Error(err))
-		response.Error(w, http.StatusInternalServerError, "batch delete failed")
+		response.AppError(w, apperr.ErrBatchDeleteFailed)
 		return
 	}
 

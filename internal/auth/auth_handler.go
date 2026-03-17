@@ -6,9 +6,8 @@ import (
 	"image-pipeline/internal/dto"
 	"image-pipeline/internal/logger"
 	"image-pipeline/internal/middleware"
-	"strings"
 
-	"image-pipeline/pkg/errors"
+	apperr "image-pipeline/pkg/errors"
 	"image-pipeline/pkg/request"
 	"image-pipeline/pkg/response"
 	"image-pipeline/pkg/validator"
@@ -17,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"net/http"
+	"strings"
 )
 
 type AuthHandler struct {
@@ -37,7 +37,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var dto dto.CreateUserDTO
 
 	if err := request.DecodeJSON(r, &dto); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid JSON")
+		response.AppError(w, apperr.ErrInvalidJSON)
 		return
 	}
 
@@ -55,17 +55,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userId, err := h.authSvc.Register(r.Context(), &req)
-
 	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			response.Error(w, appErr.Code, appErr.Message)
-		} else {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-		}
+		response.HandleError(w, err)
 		return
 	}
 
-	response.Success(w, "User Created", userId)
+	response.Success(w, "user created", userId)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -76,12 +71,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var dto dto.LoginUserDTO
 
 	if err := request.DecodeJSON(r, &dto); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid JSON")
+		response.AppError(w, apperr.ErrInvalidJSON)
 		return
 	}
 
 	if err := validator.ValidateStruct(dto); err != nil {
-		log.Error("Invalid Login Credentials!", zap.Error(err))
+		log.Error("Invalid login credentials", zap.Error(err))
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -93,12 +88,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.authSvc.Login(r.Context(), &req)
 	if err != nil {
-		log.Error("Login Failed!", zap.Error(err))
-		response.Error(w, http.StatusUnauthorized, err.Error())
+		log.Error("Login failed", zap.Error(err))
+		response.HandleError(w, err)
 		return
 	}
 
-	response.Success(w, "User Logged In Successfully!", map[string]string{
+	response.Success(w, "login successful", map[string]string{
 		"token": token,
 	})
 }
@@ -112,30 +107,30 @@ func (h *AuthHandler) JWTAuth(secret string) func(next http.Handler) http.Handle
 			tokenString = strings.TrimSpace(tokenString)
 
 			if tokenString == "" {
-				response.Error(w, http.StatusUnauthorized, "Missing token")
+				response.AppError(w, apperr.ErrMissingToken)
 				return
 			}
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 				}
 				return []byte(secret), nil
 			})
 
 			if err != nil || token == nil || !token.Valid {
-				response.Error(w, http.StatusUnauthorized, "Invalid token")
+				response.AppError(w, apperr.ErrInvalidToken)
 				return
 			}
 
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
-				response.Error(w, http.StatusUnauthorized, "Invalid Token Claims")
+				response.AppError(w, apperr.ErrInvalidClaims)
 				return
 			}
 
 			userId, ok := claims["userId"].(string)
 			if !ok {
-				response.Error(w, http.StatusUnauthorized, "userId missing in token")
+				response.AppError(w, apperr.ErrMissingUserID)
 				return
 			}
 
