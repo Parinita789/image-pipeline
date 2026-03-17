@@ -19,10 +19,6 @@ func IdempotencyCheck(repo *repository.IdempotencyRepo) func(http.Handler) http.
 			key := r.Header.Get("X-Idempotency-Key")
 			filename := r.Header.Get("X-File-Name")
 
-			if filename == "" {
-				response.Error(w, http.StatusBadRequest, "filename required!")
-				return
-			}
 			if key == "" {
 				key = uuid.New().String()
 			}

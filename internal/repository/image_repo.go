@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -32,7 +33,7 @@ func (r *ImageRepo) Save(ctx context.Context, image models.Image) error {
 			"userId":        image.UserID,
 			"filename":      image.Filename,
 			"originalUrl":   image.OriginalURL,
-			"Status":        "compressed",
+			"status":        "compressed",
 			"compressedUrl": image.CompressedURL,
 			"createdAt":     time.Now(),
 		}},
@@ -65,7 +66,7 @@ func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, use
 		}
 
 		if filters.Status != "" {
-			filter["Status"] = filters.Status
+			filter["status"] = filters.Status
 		}
 
 		count, err := r.Collection.CountDocuments(ctx, filter)
@@ -77,7 +78,7 @@ func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, use
 		opts := options.Find().
 			SetSkip(int64((page - 1) * limit)).
 			SetLimit(int64(limit)).
-			SetSort(bson.M{"createdat": -1})
+			SetSort(bson.M{"createdAt": -1})
 
 		cursor, err := r.Collection.Find(ctx, filter, opts)
 		if err != nil {
@@ -107,28 +108,74 @@ func (r *ImageRepo) FindRequestById(ctx context.Context, requestId string) (*mod
 }
 
 func (r *ImageRepo) DeleteImage(ctx context.Context, id string) (*models.Image, error) {
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+
 	var img models.Image
 
-	err := r.exec.Execute(ctx, func(ctx context.Context) error {
-		err := r.Collection.FindOne(ctx, bson.M{"_id": id}).Decode(&img)
+	err = r.exec.Execute(ctx, func(ctx context.Context) error {
+		err := r.Collection.FindOne(ctx, bson.M{"_id": objID}).Decode(&img)
+		if err == mongo.ErrNoDocuments {
+			return mongo.ErrNoDocuments
+		}
 		if err != nil {
 			return err
 		}
 
-		_, err = r.Collection.DeleteOne(ctx, bson.M{"_id": id})
+		_, err = r.Collection.DeleteOne(ctx, bson.M{"_id": objID})
 		return err
 	})
 	return &img, err
 }
 
-func (r *ImageRepo) UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error) {
-	var img models.Image
+func (r *ImageRepo) DeleteManyImages(ctx context.Context, ids []string, userId string) ([]models.Image, error) {
+	objIDs := make([]primitive.ObjectID, 0, len(ids))
+	for _, id := range ids {
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			continue
+		}
+		objIDs = append(objIDs, oid)
+	}
+	if len(objIDs) == 0 {
+		return nil, nil
+	}
+
+	filter := bson.M{"_id": bson.M{"$in": objIDs}, "userId": userId}
+
+	var deleted []models.Image
 	err := r.exec.Execute(ctx, func(ctx context.Context) error {
-		_, err := r.Collection.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": update})
+		cursor, err := r.Collection.Find(ctx, filter)
 		if err != nil {
 			return err
 		}
-		return r.Collection.FindOne(ctx, bson.M{"_id": id}).Decode(&img)
+		if err = cursor.All(ctx, &deleted); err != nil {
+			return err
+		}
+		if len(deleted) == 0 {
+			return nil
+		}
+		_, err = r.Collection.DeleteMany(ctx, filter)
+		return err
+	})
+	return deleted, err
+}
+
+func (r *ImageRepo) UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error) {
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+
+	var img models.Image
+	err = r.exec.Execute(ctx, func(ctx context.Context) error {
+		_, err := r.Collection.UpdateOne(ctx, bson.M{"_id": objID}, bson.M{"$set": update})
+		if err != nil {
+			return err
+		}
+		return r.Collection.FindOne(ctx, bson.M{"_id": objID}).Decode(&img)
 	})
 
 	return &img, err

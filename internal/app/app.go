@@ -101,10 +101,8 @@ func NewApp() *App {
 		router,
 		authHandler,
 		imageHandler,
-		// userHandler,
 		cfg.JWTSecret,
-		idemRepo,
-		middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 10), // production
+		middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 10),
 	)
 
 	return &App{

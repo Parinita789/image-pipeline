@@ -5,6 +5,6 @@ type UploadMessage struct {
 	FileName       string `json:"filename"`
 	UserId         string `json:"userId"`
 	RequestId      string `json:"requestId"`
-	TempS3Key      string `json:"tempS3Key"`
-	ContentType    string `json:"contentType`
+	RawS3Key       string `json:"rawS3Key"`
+	ContentType    string `json:"contentType"`
 }

@@ -254,7 +254,7 @@ func TestLogin_ReturnsJWT_NotPlaintext(t *testing.T) {
 // ─── JWT Tests ────────────────────────────────────────────────────────────────
 
 func TestGenerateJWT_ReturnsValidToken(t *testing.T) {
-	token, err := GenerateJWT("user-id-123", "test-secret")
+	token, err := GenerateJWT("user-id-123", "Test", "test-secret")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -268,8 +268,8 @@ func TestGenerateJWT_ReturnsValidToken(t *testing.T) {
 }
 
 func TestGenerateJWT_DifferentUsersGetDifferentTokens(t *testing.T) {
-	token1, _ := GenerateJWT("user-1", "test-secret")
-	token2, _ := GenerateJWT("user-2", "test-secret")
+	token1, _ := GenerateJWT("user-1", "Alice", "test-secret")
+	token2, _ := GenerateJWT("user-2", "Bob", "test-secret")
 
 	if token1 == token2 {
 		t.Error("different users should get different tokens")
@@ -279,8 +279,8 @@ func TestGenerateJWT_DifferentUsersGetDifferentTokens(t *testing.T) {
 func TestGenerateJWT_SameUserGetsDifferentTokensOverTime(t *testing.T) {
 	// tokens include iat (issued-at) — two calls should differ
 	// unless GenerateJWT removes iat, in which case delete this test
-	token1, _ := GenerateJWT("user-1", "test-secret")
-	token2, _ := GenerateJWT("user-1", "test-secret")
+	token1, _ := GenerateJWT("user-1", "Alice", "test-secret")
+	token2, _ := GenerateJWT("user-1", "Alice", "test-secret")
 	// not asserting they're different here — just that both are valid JWTs
 	for _, tok := range []string{token1, token2} {
 		if len(strings.Split(tok, ".")) != 3 {

@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"go.uber.org/zap"
 )
 
@@ -23,12 +24,13 @@ type S3Client struct {
 }
 
 func NewS3Client(region string, bucket string) (*S3Client, error) {
-	// using localstack
 	opts := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
 	}
 
+	usePathStyle := false
 	if endpoint := os.Getenv("AWS_ENDPOINT_URL"); endpoint != "" {
+		usePathStyle = true // LocalStack requires path-style
 		opts = append(opts, config.WithEndpointResolverWithOptions(
 			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 				return aws.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
@@ -36,14 +38,13 @@ func NewS3Client(region string, bucket string) (*S3Client, error) {
 		))
 	}
 
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
-
+	cfg, err := config.LoadDefaultConfig(context.Background(), opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.UsePathStyle = true
+		o.UsePathStyle = usePathStyle
 	})
 
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
@@ -123,7 +124,7 @@ func (s *S3Client) DownloadStream(
 // CopyObject copies an object within S3 — no data leaves AWS, zero bandwidth cost
 func (s *S3Client) CopyObject(ctx context.Context, srcKey, dstKey string) (string, error) {
 	log := logger.FromContext(ctx)
-	copySource := url.QueryEscape(s.Bucket + "/" + srcKey)
+	copySource := s.Bucket + "/" + url.PathEscape(srcKey)
 
 	_, err := s.S3.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(s.Bucket),
@@ -145,8 +146,52 @@ func (c *S3Client) DeleteObject(ctx context.Context, key string) error {
 		Bucket: &c.Bucket,
 		Key:    &key,
 	})
-
 	return err
+}
+
+func (c *S3Client) DeleteObjects(ctx context.Context, keys []string) ([]string, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	objects := make([]types.ObjectIdentifier, len(keys))
+	for i, k := range keys {
+		k := k
+		objects[i] = types.ObjectIdentifier{Key: &k}
+	}
+	out, err := c.S3.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		Bucket: aws.String(c.Bucket),
+		Delete: &types.Delete{Objects: objects, Quiet: aws.Bool(true)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	failed := make([]string, 0, len(out.Errors))
+	for _, e := range out.Errors {
+		if e.Key != nil {
+			failed = append(failed, *e.Key)
+		}
+	}
+	return failed, nil
+}
+
+func (s *S3Client) PresignPutObject(ctx context.Context, key, contentType string, size int64, expiry time.Duration) (string, error) {
+	presignClient := s3.NewPresignClient(s.S3)
+	req, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(s.Bucket),
+		Key:           aws.String(key),
+		ContentType:   aws.String(contentType),
+		ContentLength: aws.Int64(size),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = expiry
+	})
+	if err != nil {
+		return "", fmt.Errorf("presign failed: %w", err)
+	}
+	return req.URL, nil
+}
+
+func (s *S3Client) ObjectURL(key string) string {
+	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.Bucket, key)
 }
 
 func (c *S3Client) ObjectExists(ctx context.Context, prefix string) (bool, error) {

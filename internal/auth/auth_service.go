@@ -71,7 +71,7 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, err
 		log.Info("Failed login attempt", zap.String("email", req.Email))
 		return "", errors.New("invalid credentials")
 	}
-	token, _ := GenerateJWT(user.ID.Hex(), s.jwtSecret)
+	token, _ := GenerateJWT(user.ID.Hex(), user.FirstName, s.jwtSecret)
 
 	return token, nil
 }

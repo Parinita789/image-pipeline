@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -20,9 +19,7 @@ type Config struct {
 }
 
 func LoadConfig() (*Config, error) {
-	fmt.Println("CLOUDFRONT FROM ENV:", os.Getenv("CLOUDFRONT_DOMAIN"))
 	_ = godotenv.Load()
-	fmt.Println("CLOUDFRONT AFTER LOAD:", os.Getenv("CLOUDFRONT_DOMAIN"))
 
 	cfg := &Config{
 		AWSRegion:        os.Getenv("AWS_REGION"),
