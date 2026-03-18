@@ -210,7 +210,7 @@ Config values are set via `Pulumi.prod.yaml` — secrets (mongoUri, jwtSecret, g
 
 - **Prometheus metrics** exposed at `GET /metrics` — HTTP request duration/count, upload pipeline counters, worker job stats, auth operations, compression ratios
 - **Grafana Alloy** sidecar scrapes the API every 15s and remote-writes to Grafana Cloud Hosted Prometheus
-- **Structured logging** via zap — every log line includes `request_id` and `user_id`
+- **Structured logging** via zap — every log line includes `requestId` and `userId`
 - **CloudWatch Logs** — all container stdout forwarded via `awslogs` driver
 
 Alloy config: `monitoring/alloy/config.river`
@@ -234,7 +234,7 @@ Response envelope is always `{ status, code, message, data }` — clients can sw
 - **Resilience** — all S3, SQS, and MongoDB calls wrapped with retry + exponential backoff
 - **Bulk S3 operations** — batch delete uses `DeleteObjects` API (1 call for up to 1000 keys, not N individual calls)
 - **Rate limiting** — token bucket per user with auto-cleanup
-- **Request-scoped logging** — `request_id` and `user_id` on every log line
+- **Request-scoped logging** — `requestId` and `userId` on every log line
 - **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs before exit
 - **Centralized errors** — typed `AppError` constants with HTTP code, machine-readable code, and message; single source of truth across handlers, middleware, and services
 
