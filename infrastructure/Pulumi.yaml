@@ -1,0 +1,7 @@
+name: image-pipeline-infra
+description: Image pipeline AWS infrastructure
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: go

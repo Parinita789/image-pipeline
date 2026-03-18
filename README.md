@@ -1,6 +1,6 @@
 # image-pipeline
 
-Production-grade async image processing pipeline built with Go, React, and AWS. Users upload images via presigned S3 URLs — file bytes never touch the API server — and a background worker compresses them and serves via CloudFront CDN.
+Production-grade async image processing pipeline built with Go and AWS. Users upload images via presigned S3 URLs — file bytes never touch the API server — and a background worker compresses them and serves via CloudFront CDN.
 
 ## Architecture
 
@@ -33,13 +33,6 @@ Browser                          AWS
 - **AWS** — S3 (storage + presigned URLs), SQS (job queue), CloudFront (CDN)
 - **MongoDB** — metadata, idempotency tracking, user accounts
 
-### Frontend
-- **React 19** + TypeScript + Vite
-- **TanStack Query** — data fetching with auto-polling for processing status
-- **Zustand** — auth state (JWT in localStorage)
-- **Tailwind CSS** — styling
-- **react-dropzone** — drag-and-drop file upload
-
 ## API Endpoints
 
 ### Public
@@ -63,7 +56,6 @@ Browser                          AWS
 
 ### Prerequisites
 - Go 1.25+
-- Node.js 18+
 - MongoDB
 - AWS account (S3 bucket, SQS queue, CloudFront distribution)
 
@@ -81,21 +73,6 @@ WORKER_COUNT=5
 CLOUDFRONT_DOMAIN=your-distribution.cloudfront.net
 ```
 
-### S3 Bucket CORS
-
-The browser uploads directly to S3 via presigned URLs. Your bucket needs a CORS policy:
-
-```bash
-aws s3api put-bucket-cors --bucket your-bucket-name --cors-configuration '{
-  "CORSRules": [{
-    "AllowedOrigins": ["http://localhost:5173"],
-    "AllowedMethods": ["PUT", "GET"],
-    "AllowedHeaders": ["*"],
-    "MaxAgeSeconds": 3600
-  }]
-}'
-```
-
 ### Running Locally
 
 ```bash
@@ -104,12 +81,7 @@ go run cmd/api/main.go
 
 # Worker (separate terminal)
 go run cmd/worker/main.go
-
-# Frontend (separate terminal)
-cd frontend && npm install && npm run dev
 ```
-
-The frontend runs at `http://localhost:5173` and proxies `/api` to the Go server at `:8080`.
 
 ### Running with Docker
 
@@ -182,21 +154,78 @@ image-pipeline/
 │   ├── validator/               # Input validation
 │   ├── pagination/              # Pagination helpers
 │   └── errors/                  # Custom error types
-├── frontend/                    # React SPA
-│   ├── src/
-│   │   ├── api/                 # Axios client + API functions
-│   │   ├── components/          # ImageCard, UploadModal, DeleteConfirmModal, etc.
-│   │   ├── hooks/               # useImages, useDeleteImage, useUpload
-│   │   ├── pages/               # Login, Register, Dashboard
-│   │   ├── store/               # Zustand auth store
-│   │   └── types/               # TypeScript interfaces
-│   └── vite.config.ts           # Dev proxy to :8080
+├── infrastructure/                 # Pulumi IaC (Go)
+│   ├── main.go                    # Entrypoint — config, orchestration
+│   ├── vpc.go                     # VPC, subnet, IGW, security group
+│   ├── ecs.go                     # ECS cluster
+│   ├── tasks.go                   # Task definitions + services (API, Worker, Alloy sidecar)
+│   ├── iam.go                     # Execution role + task role
+│   ├── cloudwatch.go              # Log groups
+│   ├── api_gateway.go             # HTTP API Gateway → ECS
+│   └── Pulumi.prod.yaml           # Stack config (secrets encrypted)
+├── monitoring/
+│   └── alloy/
+│       ├── config.river           # Prometheus scrape + remote write to Grafana Cloud
+│       └── Dockerfile
 ├── scripts/
-│   ├── localstack-init.sh       # Creates S3 bucket (with CORS) + SQS queue
-│   └── dev.sh                   # Docker compose rebuild
-├── Dockerfile                   # Multi-stage (api + worker targets)
-└── docker-compose.yml           # MongoDB, LocalStack, API, Worker
+│   ├── localstack-init.sh         # Creates S3 bucket (with CORS) + SQS queue
+│   ├── dev.sh                     # Docker compose rebuild
+│   └── push.sh                    # Build & push API/Worker images to ECR
+├── Dockerfile                     # Multi-stage (api + worker targets)
+└── docker-compose.yml             # MongoDB, LocalStack, API, Worker
 ```
+
+## Infrastructure (AWS via Pulumi)
+
+The `infrastructure/` directory contains Pulumi IaC (Go) that provisions the full production stack on AWS:
+
+| Resource | Details |
+|----------|---------|
+| **VPC** | Public subnet, internet gateway, security group (ingress 8080, 4317, 4318) |
+| **ECS Fargate** | Cluster with Container Insights enabled |
+| **API Service** | 0.25 vCPU / 512 MB, health check on `/health`, public IP |
+| **Worker Service** | 0.25 vCPU / 512 MB, polls SQS, min-healthy 0% during deploy |
+| **Grafana Alloy sidecar** | Runs alongside API container, scrapes `/metrics` → Grafana Cloud |
+| **IAM** | Task execution role (ECR pull, CloudWatch logs) + task role (S3, SQS full access) |
+| **CloudWatch** | Log groups `/image-pipeline/api` and `/image-pipeline/worker` (7-day retention) |
+| **API Gateway** | HTTP API with catch-all `ANY /{proxy+}` → ECS API task, auto-deploy stage |
+
+### Deploying
+
+```bash
+cd infrastructure
+pulumi up --stack prod
+```
+
+Config values are set via `Pulumi.prod.yaml` — secrets (mongoUri, jwtSecret, grafanaApiKey) are encrypted by Pulumi.
+
+### Building & Pushing Images
+
+```bash
+# Build and push API + Worker images to ECR
+./scripts/push.sh v1
+```
+
+## Observability
+
+- **Prometheus metrics** exposed at `GET /metrics` — HTTP request duration/count, upload pipeline counters, worker job stats, auth operations, compression ratios
+- **Grafana Alloy** sidecar scrapes the API every 15s and remote-writes to Grafana Cloud Hosted Prometheus
+- **Structured logging** via zap — every log line includes `request_id` and `user_id`
+- **CloudWatch Logs** — all container stdout forwarded via `awslogs` driver
+
+Alloy config: `monitoring/alloy/config.river`
+
+## Error Handling
+
+All errors use a centralized `AppError` system (`pkg/errors/`):
+
+```go
+// Machine-readable codes, consistent HTTP status mapping
+var ErrImageNotFound  = New(404, "IMAGE_NOT_FOUND", "image not found")
+var ErrImageForbidden = New(403, "IMAGE_FORBIDDEN", "you do not own this image")
+```
+
+Response envelope is always `{ status, code, message, data }` — clients can switch on `code` for programmatic error handling.
 
 ## Key Design Decisions
 
@@ -207,6 +236,7 @@ image-pipeline/
 - **Rate limiting** — token bucket per user with auto-cleanup
 - **Request-scoped logging** — `request_id` and `user_id` on every log line
 - **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs before exit
+- **Centralized errors** — typed `AppError` constants with HTTP code, machine-readable code, and message; single source of truth across handlers, middleware, and services
 
 ## Testing
 

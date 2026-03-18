@@ -1,0 +1,3 @@
+name: image-pipeline-infra
+description: Image pipeline AWS infrastructure
+runtime: go

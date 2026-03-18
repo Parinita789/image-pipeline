@@ -1,0 +1,14 @@
+config:
+  image-pipeline-infra:awsRegion: us-west-1
+  image-pipeline-infra:s3Bucket: amzn-s3-image-pipeline-bucket
+  image-pipeline-infra:sqsQueueUrl: https://sqs.us-west-1.amazonaws.com/620651905260/ImagePipelineQueue
+  image-pipeline-infra:apiImageUri: 620651905260.dkr.ecr.us-west-1.amazonaws.com/image-pipeline/api:v5
+  image-pipeline-infra:workerImageUri: 620651905260.dkr.ecr.us-west-1.amazonaws.com/image-pipeline/worker:v5
+  image-pipeline-infra:mongoUri:
+    secure: AAABAHaszxfB6VVag9wbVFIt5RfuouNx8jPZ9WLVfXQzAQjrbrlKLGwz7LFSVZfEyX5WQ63yZxJbFhFGG4VI5qntgp/3mnEDmFA2cN+SbLnFcVUbTpyJAjTxlGED9iEo4Z9cVnGtDpvBUp0OD3gil59Wh18osn6WozXQSqgt0dqmo0K7JPGMon0lZimy1eXq4jo=
+  image-pipeline-infra:jwtSecret:
+    secure: AAABAKrFy33Q2mgHWbLS0UJZW5cWydWp/gweXQnI2d92sVF9xLniH3Jz
+  image-pipeline-infra:apiTaskIp: 13.56.157.166
+  image-pipeline-infra:alloyImageUri: 620651905260.dkr.ecr.us-west-1.amazonaws.com/image-pipeline/alloy:latest
+  image-pipeline-infra:grafanaApiKey:
+    secure: AAABACy9F6mQb9AUTICjPwKzt62sYmbRFuJSlGCvSywpQJ4x+QY+4tIy/k4enh9QGrb34IrbF3id3oLwnK5nqL3Eg7MRVmJSTKxENjRmNriCa2KlakT0CZxlmUdecH/97WM4jhkcNQp5OlAABC4k/xLKpt4ptJZ+AxO1M59gWmbu7Y/yVwhMJMv4sOuwxx6Dv3BjMKJCYYf40P1pkpf5YxDoNCI3QyG0NxYwADV7x7jrmBrH760F0n1fbwWlRp3+edWYLA==

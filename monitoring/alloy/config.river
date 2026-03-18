@@ -1,0 +1,29 @@
+// monitoring/alloy/config.river
+
+prometheus.scrape "image_pipeline_api_metrics" {
+  targets = [{
+    __address__ = "localhost:8080",
+  }]
+  scrape_interval = "15s"
+  metrics_path    = "/metrics"
+
+  forward_to = [prometheus.remote_write.metrics_hosted_prometheus.receiver]
+}
+
+prometheus.remote_write "metrics_hosted_prometheus" {
+  endpoint {
+    name = "hosted-prometheus"
+    url  = "https://prometheus-prod-67-prod-us-west-0.grafana.net/api/prom/push"
+
+    basic_auth {
+      username = "3050396"
+      password = env("GRAFANA_API_KEY")
+    }
+  }
+
+  external_labels = {
+    app     = "image-pipeline",
+    env     = "production",
+    service = "api",
+  }
+}
