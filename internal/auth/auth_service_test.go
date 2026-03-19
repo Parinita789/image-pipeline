@@ -197,8 +197,8 @@ func TestLogin_WrongPassword_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for wrong password")
 	}
 	// must not reveal whether email or password is wrong
-	if !strings.Contains(err.Error(), "invalid credentials") {
-		t.Errorf("expected 'invalid credentials' error, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid email or password") {
+		t.Errorf("expected 'invalid email or password' error, got: %v", err)
 	}
 }
 
