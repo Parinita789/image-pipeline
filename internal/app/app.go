@@ -103,6 +103,7 @@ func NewApp() *App {
 		imageHandler,
 		cfg.JWTSecret,
 		middleware.NewRateLimiter(rate.Every(200*time.Millisecond), 10),
+		idemRepo,
 	)
 
 	return &App{

@@ -5,33 +5,45 @@ Production-grade async image processing pipeline built with Go and AWS. Users up
 ## Architecture
 
 ```
-Browser                          AWS
-  │                               │
-  │  1. POST /images/prepare      │
-  │ ─────────────────────► API    │
-  │ ◄───── presigned URLs         │
-  │                               │
-  │  2. PUT (file bytes)          │
-  │ ──────────────────────────► S3│
-  │                               │
-  │  3. POST /images/confirm      │
-  │ ─────────────────────► API ──► SQS
-  │                               │
-  │                        Worker │
-  │                          │ poll SQS
-  │                          │ download raw from S3
-  │                          │ compress (JPEG Q60 / PNG best)
-  │                          │ upload compressed to S3
-  │                          │ save metadata to MongoDB
-  │                          │ serve via CloudFront CDN
+Browser                              AWS
+  │                                   │
+  │  1. POST /api/images/prepare      │
+  │ ──────────────► CloudFront ──► API Gateway ──► ECS API
+  │ ◄────────────── presigned URLs    │
+  │                                   │
+  │  2. PUT (file bytes)              │
+  │ ──────────────────────────────► S3│
+  │                                   │
+  │  3. POST /api/images/confirm      │
+  │ ──────────────► CloudFront ──► API Gateway ──► ECS API ──► SQS
+  │                                   │
+  │  4. Static assets (HTML/JS/CSS)   │
+  │ ──────────────► CloudFront ──► S3 (frontend bucket)
+  │                                   │
+  │                            Worker │
+  │                              │ poll SQS
+  │                              │ download raw from S3
+  │                              │ compress (JPEG Q60 / PNG best)
+  │                              │ upload compressed to S3
+  │                              │ save metadata to MongoDB
+  │                              │ serve via CloudFront CDN
 ```
 
 ## Stack
 
 ### Backend
 - **Go** — chi router, zap structured logging
-- **AWS** — S3 (storage + presigned URLs), SQS (job queue), CloudFront (CDN)
+- **AWS** — S3 (storage + presigned URLs), SQS (job queue), CloudFront (CDN + frontend hosting), ECS Fargate, API Gateway, Secrets Manager
 - **MongoDB** — metadata, idempotency tracking, user accounts
+
+### Frontend
+- **React** + TypeScript + Vite (separate repo)
+- Deployed to S3 + CloudFront
+- Single CloudFront distribution serves both frontend and API (`/api/*` routes to backend)
+
+### Infrastructure
+- **Pulumi** (Go) — all AWS resources as code
+- **GitHub Actions** — CI/CD pipeline (test → build → deploy)
 
 ## API Endpoints
 
@@ -112,20 +124,6 @@ curl -X POST http://localhost:8080/images/confirm \
   -d '{"files": [{"key": "raw/userId/reqId_photo.jpg", "filename": "photo.jpg", "requestId": "reqId"}]}'
 ```
 
-## Batch Delete
-
-```bash
-curl -X DELETE http://localhost:8080/images \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"ids": ["id1", "id2", "id3"]}'
-```
-
-Returns which IDs were deleted and which S3 keys failed cleanup:
-```json
-{"data": {"deleted": ["id1", "id2", "id3"], "failed": []}}
-```
-
 ## Project Structure
 
 ```
@@ -154,25 +152,31 @@ image-pipeline/
 │   ├── validator/               # Input validation
 │   ├── pagination/              # Pagination helpers
 │   └── errors/                  # Custom error types
-├── infrastructure/                 # Pulumi IaC (Go)
-│   ├── main.go                    # Entrypoint — config, orchestration
-│   ├── vpc.go                     # VPC, subnet, IGW, security group
-│   ├── ecs.go                     # ECS cluster
-│   ├── tasks.go                   # Task definitions + services (API, Worker, Alloy sidecar)
-│   ├── iam.go                     # Execution role + task role
-│   ├── cloudwatch.go              # Log groups
-│   ├── api_gateway.go             # HTTP API Gateway → ECS
-│   └── Pulumi.prod.yaml           # Stack config (secrets encrypted)
+├── infrastructure/              # Pulumi IaC (Go)
+│   ├── main.go                  # Entrypoint — config, orchestration
+│   ├── vpc.go                   # VPC, subnet, IGW, security group
+│   ├── ecs.go                   # ECS cluster
+│   ├── tasks.go                 # Task definitions + services (API, Worker, Alloy sidecar)
+│   ├── iam.go                   # Execution role + task role
+│   ├── secrets.go               # AWS Secrets Manager + IAM policy
+│   ├── cloudwatch.go            # Log groups
+│   ├── api_gateway.go           # HTTP API Gateway → ECS
+│   ├── frontend.go              # S3 + CloudFront (frontend hosting + API proxy)
+│   └── Pulumi.prod.yaml         # Stack config (secrets encrypted)
 ├── monitoring/
 │   └── alloy/
-│       ├── config.river           # Prometheus scrape + remote write to Grafana Cloud
+│       ├── config.river         # Prometheus scrape + remote write to Grafana Cloud
 │       └── Dockerfile
 ├── scripts/
-│   ├── localstack-init.sh         # Creates S3 bucket (with CORS) + SQS queue
-│   ├── dev.sh                     # Docker compose rebuild
-│   └── push.sh                    # Build & push API/Worker images to ECR
-├── Dockerfile                     # Multi-stage (api + worker targets)
-└── docker-compose.yml             # MongoDB, LocalStack, API, Worker
+│   ├── localstack-init.sh       # Creates S3 bucket (with CORS) + SQS queue
+│   ├── dev.sh                   # Docker compose rebuild
+│   ├── push.sh                  # Build & push API/Worker images to ECR + deploy
+│   ├── deploy-frontend.sh       # Build frontend, sync to S3, invalidate CloudFront
+│   └── update-api-gateway.sh    # Fetch current ECS task IP for API Gateway
+├── .github/workflows/
+│   └── deploy.yml               # CI/CD: test → build → push → deploy
+├── Dockerfile                   # Multi-stage (api + worker targets)
+└── docker-compose.yml           # MongoDB, LocalStack, API, Worker
 ```
 
 ## Infrastructure (AWS via Pulumi)
@@ -181,30 +185,36 @@ The `infrastructure/` directory contains Pulumi IaC (Go) that provisions the ful
 
 | Resource | Details |
 |----------|---------|
-| **VPC** | Public subnet, internet gateway, security group (ingress 8080, 4317, 4318) |
+| **VPC** | Public subnet, internet gateway, security group (ingress 8080) |
 | **ECS Fargate** | Cluster with Container Insights enabled |
 | **API Service** | 0.25 vCPU / 512 MB, health check on `/health`, public IP |
 | **Worker Service** | 0.25 vCPU / 512 MB, polls SQS, min-healthy 0% during deploy |
 | **Grafana Alloy sidecar** | Runs alongside API container, scrapes `/metrics` → Grafana Cloud |
-| **IAM** | Task execution role (ECR pull, CloudWatch logs) + task role (S3, SQS full access) |
+| **IAM** | Task execution role (ECR pull, CloudWatch logs, Secrets Manager) + task role (S3, SQS) |
+| **Secrets Manager** | Stores MONGO_URI, JWT_SECRET, GRAFANA_API_KEY — ECS pulls at runtime via `valueFrom` |
 | **CloudWatch** | Log groups `/image-pipeline/api` and `/image-pipeline/worker` (7-day retention) |
 | **API Gateway** | HTTP API with catch-all `ANY /{proxy+}` → ECS API task, auto-deploy stage |
+| **S3 + CloudFront** | Frontend static hosting with OAC, `/api/*` proxied to API Gateway via CloudFront Function |
 
 ### Deploying
 
 ```bash
+# Infrastructure
 cd infrastructure
 pulumi up --stack prod
-```
 
-Config values are set via `Pulumi.prod.yaml` — secrets (mongoUri, jwtSecret, grafanaApiKey) are encrypted by Pulumi.
-
-### Building & Pushing Images
-
-```bash
-# Build and push API + Worker images to ECR
+# Backend images
 ./scripts/push.sh v1
+
+# Frontend
+./scripts/deploy-frontend.sh
 ```
+
+### CI/CD
+
+Push to `main` triggers the GitHub Actions pipeline which runs tests, builds Docker images, pushes to ECR, and deploys via Pulumi. Frontend deploys are manual via `deploy-frontend.sh`.
+
+Required GitHub secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `PULUMI_ACCESS_TOKEN`.
 
 ## Observability
 
@@ -213,7 +223,15 @@ Config values are set via `Pulumi.prod.yaml` — secrets (mongoUri, jwtSecret, g
 - **Structured logging** via zap — every log line includes `requestId` and `userId`
 - **CloudWatch Logs** — all container stdout forwarded via `awslogs` driver
 
-Alloy config: `monitoring/alloy/config.river`
+## Security
+
+- **Presigned URLs** — file bytes never touch the API server
+- **AWS Secrets Manager** — sensitive config pulled at runtime, never stored as plaintext env vars
+- **CloudFront OAC** — S3 buckets not publicly accessible
+- **JWT authentication** — all image endpoints require valid token
+- **Rate limiting** — token bucket per user
+- **Idempotency** — safe to retry uploads without duplicates
+- **CORS** — locked to specific allowed origins
 
 ## Error Handling
 
@@ -236,7 +254,7 @@ Response envelope is always `{ status, code, message, data }` — clients can sw
 - **Rate limiting** — token bucket per user with auto-cleanup
 - **Request-scoped logging** — `requestId` and `userId` on every log line
 - **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs before exit
-- **Centralized errors** — typed `AppError` constants with HTTP code, machine-readable code, and message; single source of truth across handlers, middleware, and services
+- **Single CloudFront distribution** — serves both frontend and API, so the frontend uses relative `/api` paths with zero CORS issues
 
 ## Testing
 

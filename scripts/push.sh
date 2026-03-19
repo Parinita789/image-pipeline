@@ -40,6 +40,7 @@ echo "updating pulumi config..."
 cd infrastructure
 pulumi config set apiImageUri $ECR_BASE/image-pipeline/api:$VERSION
 pulumi config set workerImageUri $ECR_BASE/image-pipeline/worker:$VERSION
+pulumi config set cdnDomain dsysr3le2jq85.cloudfront.net
 
 # get current task IP and update config
 cd ..

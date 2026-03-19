@@ -47,11 +47,16 @@ func main() {
 			return err
 		}
 
-		// ECS tasks]
+		// Secrets Manager
+		secrets, err := createSecrets(ctx, roles, mongoURI, jwtSecret, grafanaAPIKey)
+		if err != nil {
+			return err
+		}
+
+		// ECS tasks
 		appConfig := &AppConfig{
 			AWSRegion:      awsRegion,
-			MongoURI:       mongoURI,
-			JWTSecret:      jwtSecret,
+			SecretArn:      secrets.Secret.Arn,
 			SQSQueueURL:    sqsQueueURL,
 			S3Bucket:       s3Bucket,
 			CDNDomain:      cdnDomain,
@@ -59,7 +64,6 @@ func main() {
 			APIImageURI:    apiImageURI,
 			WorkerImageURI: workerImageURI,
 			AlloyImageURI:  alloyImageURI,
-			GrafanaAPIKey:  grafanaAPIKey,
 		}
 
 		services, err := createECSServices(ctx, vpc, cluster, roles, logGroups, appConfig)
@@ -68,7 +72,13 @@ func main() {
 		}
 
 		// API Gateway
-		_, err = createAPIGateway(ctx, services)
+		apiGateway, err := createAPIGateway(ctx, services)
+		if err != nil {
+			return err
+		}
+
+		// Frontend (S3 + CloudFront)
+		_, err = createFrontend(ctx, apiGateway)
 		if err != nil {
 			return err
 		}

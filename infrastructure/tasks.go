@@ -9,8 +9,7 @@ import (
 
 type AppConfig struct {
 	AWSRegion      string
-	MongoURI       pulumi.StringOutput
-	JWTSecret      pulumi.StringOutput
+	SecretArn      pulumi.StringOutput
 	SQSQueueURL    string
 	S3Bucket       string
 	CDNDomain      string
@@ -18,7 +17,6 @@ type AppConfig struct {
 	APIImageURI    string
 	WorkerImageURI string
 	AlloyImageURI  string
-	GrafanaAPIKey  pulumi.StringOutput
 }
 
 type ECSServices struct {
@@ -101,12 +99,8 @@ func createAPITaskDef(
 	logs *LogGroups,
 	cfg *AppConfig,
 ) (*ecs.TaskDefinition, error) {
-	containerDef := pulumi.All(cfg.MongoURI, cfg.JWTSecret, cfg.GrafanaAPIKey).ApplyT(
-		func(args []interface{}) (string, error) {
-			mongoURI := args[0].(string)
-			jwtSecret := args[1].(string)
-			grafanaAPIKey := args[2].(string)
-
+	containerDef := cfg.SecretArn.ApplyT(
+		func(secretArn string) (string, error) {
 			def := []map[string]interface{}{
 				{
 					"name":  "api",
@@ -118,11 +112,13 @@ func createAPITaskDef(
 						{"name": "AWS_REGION", "value": cfg.AWSRegion},
 						{"name": "S3_BUCKET", "value": cfg.S3Bucket},
 						{"name": "SQS_QUEUE_URL", "value": cfg.SQSQueueURL},
-						{"name": "CDN_DOMAIN", "value": cfg.CDNDomain},
+						{"name": "CLOUDFRONT_DOMAIN", "value": cfg.CDNDomain},
 						{"name": "PORT", "value": "8080"},
 						{"name": "ENV", "value": "production"},
-						{"name": "MONGO_URI", "value": mongoURI},
-						{"name": "JWT_SECRET", "value": jwtSecret},
+					},
+					"secrets": []map[string]string{
+						{"name": "MONGO_URI", "valueFrom": secretArn + ":MONGO_URI::"},
+						{"name": "JWT_SECRET", "valueFrom": secretArn + ":JWT_SECRET::"},
 					},
 					"logConfiguration": map[string]interface{}{
 						"logDriver": "awslogs",
@@ -145,8 +141,8 @@ func createAPITaskDef(
 				{
 					"name":  "alloy",
 					"image": cfg.AlloyImageURI,
-					"environment": []map[string]string{
-						{"name": "GRAFANA_API_KEY", "value": grafanaAPIKey},
+					"secrets": []map[string]string{
+						{"name": "GRAFANA_API_KEY", "valueFrom": secretArn + ":GRAFANA_API_KEY::"},
 					},
 					"logConfiguration": map[string]interface{}{
 						"logDriver": "awslogs",
@@ -189,12 +185,8 @@ func createWorkerTaskDef(
 	logs *LogGroups,
 	cfg *AppConfig,
 ) (*ecs.TaskDefinition, error) {
-
-	containerDef := pulumi.All(cfg.MongoURI, cfg.JWTSecret).ApplyT(
-		func(args []interface{}) (string, error) {
-			mongoURI := args[0].(string)
-			jwtSecret := args[1].(string)
-
+	containerDef := cfg.SecretArn.ApplyT(
+		func(secretArn string) (string, error) {
 			def := []map[string]interface{}{
 				{
 					"name":  "worker",
@@ -203,11 +195,13 @@ func createWorkerTaskDef(
 						{"name": "AWS_REGION", "value": cfg.AWSRegion},
 						{"name": "S3_BUCKET", "value": cfg.S3Bucket},
 						{"name": "SQS_QUEUE_URL", "value": cfg.SQSQueueURL},
-						{"name": "CDN_DOMAIN", "value": cfg.CDNDomain},
+						{"name": "CLOUDFRONT_DOMAIN", "value": cfg.CDNDomain},
 						{"name": "WORKER_COUNT", "value": cfg.WorkerCount},
 						{"name": "ENV", "value": "production"},
-						{"name": "MONGO_URI", "value": mongoURI},
-						{"name": "JWT_SECRET", "value": jwtSecret},
+					},
+					"secrets": []map[string]string{
+						{"name": "MONGO_URI", "valueFrom": secretArn + ":MONGO_URI::"},
+						{"name": "JWT_SECRET", "valueFrom": secretArn + ":JWT_SECRET::"},
 					},
 					"logConfiguration": map[string]interface{}{
 						"logDriver": "awslogs",

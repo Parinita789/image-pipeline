@@ -2,3 +2,6 @@
 .env
 .env.*
 .pulumi/
+
+# Go build artifacts
+infrastructure/image-pipeline-infra

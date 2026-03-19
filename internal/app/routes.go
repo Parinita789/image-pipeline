@@ -4,6 +4,7 @@ import (
 	"image-pipeline/internal/auth"
 	"image-pipeline/internal/handlers"
 	"image-pipeline/internal/middleware"
+	"image-pipeline/internal/repository"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -17,9 +18,10 @@ func RegisterRoutes(
 	imageHandler *handlers.ImageHandler,
 	jwtSecret string,
 	rateLimiter *middleware.RateLimiter,
+	idemRepo *repository.IdempotencyRepo,
 ) {
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedOrigins:   []string{"http://localhost:5173", "https://d3vldc1umh6ksf.cloudfront.net"},
 		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Idempotency-Key", "X-Request-Id"},
 		AllowCredentials: false,
@@ -45,7 +47,7 @@ func RegisterRoutes(
 	router.Group(func(pr chi.Router) {
 		pr.Use(auth.JWTAuth(jwtSecret))
 		pr.Post("/images/prepare", imageHandler.PrepareUpload)
-		pr.Post("/images/confirm", imageHandler.ConfirmUpload)
+		pr.With(middleware.IdempotencyCheck(idemRepo)).Post("/images/confirm", imageHandler.ConfirmUpload)
 		pr.Get("/images", imageHandler.GetImages)
 		pr.Get("/images/{requestId}", imageHandler.GetImageByRequestId)
 		pr.Delete("/image/{id}", imageHandler.DeleteImage)

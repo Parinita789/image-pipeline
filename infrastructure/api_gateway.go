@@ -41,7 +41,7 @@ func createAPIGateway(ctx *pulumi.Context, services *ECSServices) (*apigatewayv2
 		ApiId:             api.ID(),
 		IntegrationType:   pulumi.String("HTTP_PROXY"),
 		IntegrationMethod: pulumi.String("ANY"),
-		IntegrationUri:    pulumi.Sprintf("http://%s:8080", taskIp), PayloadFormatVersion: pulumi.String("1.0"),
+		IntegrationUri:    pulumi.Sprintf("http://%s:8080/{proxy}", taskIp), PayloadFormatVersion: pulumi.String("1.0"),
 	})
 	if err != nil {
 		return nil, err

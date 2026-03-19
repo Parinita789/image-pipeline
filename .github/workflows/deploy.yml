@@ -1,0 +1,97 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (default: git SHA)"
+        required: false
+
+env:
+  AWS_REGION: us-west-1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go vet ./...
+      - run: go test ./internal/auth/... ./internal/services/...
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Set version
+        run: echo "VERSION=${{ inputs.version || github.sha }}" >> $GITHUB_ENV
+
+      - name: Build and push images
+        run: |
+          ECR_BASE=${{ steps.ecr.outputs.registry }}
+
+          docker buildx build --platform linux/amd64 --target api --push \
+            -t $ECR_BASE/image-pipeline/api:$VERSION \
+            -t $ECR_BASE/image-pipeline/api:latest .
+
+          docker buildx build --platform linux/amd64 --target worker --push \
+            -t $ECR_BASE/image-pipeline/worker:$VERSION \
+            -t $ECR_BASE/image-pipeline/worker:latest .
+
+          docker buildx build --platform linux/amd64 --push \
+            -t $ECR_BASE/image-pipeline/alloy:latest \
+            monitoring/alloy/
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v6
+        with:
+          command: version
+
+      - name: Deploy infrastructure
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          ECR_BASE=${{ steps.ecr.outputs.registry }}
+          cd infrastructure
+          go mod download
+
+          pulumi stack select prod
+          pulumi config set apiImageUri $ECR_BASE/image-pipeline/api:$VERSION
+          pulumi config set workerImageUri $ECR_BASE/image-pipeline/worker:$VERSION
+          pulumi up --yes
+
+      - name: Update API Gateway IP
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          # Wait for new ECS task to start
+          echo "waiting for new ECS task..."
+          aws ecs wait tasks-running \
+            --cluster image-pipeline \
+            --tasks $(aws ecs list-tasks --cluster image-pipeline --service-name image-pipeline-api --query 'taskArns[0]' --output text) \
+            --region $AWS_REGION
+
+          ./scripts/update-api-gateway.sh
+          cd infrastructure
+          pulumi up --yes

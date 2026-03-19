@@ -166,6 +166,7 @@ func setupSuite(ctx context.Context) (*suite, error) {
 		imageHandler,
 		jwtSecret,
 		middleware.NewRateLimiter(rate.Every(time.Millisecond), 10000),
+		idemRepo,
 	)
 
 	s.router = router
