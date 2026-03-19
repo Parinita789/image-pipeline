@@ -82,7 +82,8 @@ jobs:
           # AWS provider config
           pulumi config set aws:region $AWS_REGION
 
-          # App config
+          # App config (apiTaskIp is a placeholder — updated after ECS deploys)
+          pulumi config set apiTaskIp 0.0.0.0
           pulumi config set awsRegion $AWS_REGION
           pulumi config set s3Bucket ${{ secrets.S3_BUCKET }}
           pulumi config set sqsQueueUrl ${{ secrets.SQS_QUEUE_URL }}
