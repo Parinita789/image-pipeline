@@ -1,11 +1,6 @@
 name: 🤖 AI Test Agent
 
 on:
-  push:
-    branches:
-      - main
-      - dev
-      - "feature/**"
   workflow_dispatch:
     inputs:
       mode:
