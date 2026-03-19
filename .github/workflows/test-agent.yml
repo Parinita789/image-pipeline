@@ -1,0 +1,63 @@
+name: 🤖 AI Test Agent
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - "feature/**"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "'commit' = push directly | 'pr' = open pull request"
+        required: false
+        default: "pr"
+
+jobs:
+  ai-test-agent:
+    name: Fix & Add Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      # Run your existing tests first — skip agent if everything passes
+      - name: Run existing tests
+        id: tests
+        run: go test ./... 2>&1
+        continue-on-error: true
+
+      # Only run the agent if tests failed
+      - name: Run AI Test Agent
+        if: steps.tests.outcome == 'failure'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AGENT_MODE: ${{ github.event.inputs.mode || 'pr' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run ./tools/test-agent/
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 🤖 AI Test Agent" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.tests.outcome }}" == "success" ]; then
+            echo "✅ Tests passed — agent was not needed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔧 Tests were failing — agent was invoked." >> $GITHUB_STEP_SUMMARY
+          fi
