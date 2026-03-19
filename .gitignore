@@ -5,3 +5,6 @@
 
 # Go build artifacts
 infrastructure/image-pipeline-infra
+
+# Pulumi stack
+infrastructure/Pulumi.prod.yaml

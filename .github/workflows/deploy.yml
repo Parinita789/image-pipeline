@@ -69,7 +69,7 @@ jobs:
       - name: Install Pulumi
         run: curl -fsSL https://get.pulumi.com | sh && echo "$HOME/.pulumi/bin" >> $GITHUB_PATH
 
-      - name: Deploy infrastructure
+      - name: Configure Pulumi stack
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
@@ -78,19 +78,40 @@ jobs:
           go mod download
 
           pulumi stack select prod
+
+          # AWS provider config
+          pulumi config set aws:region $AWS_REGION
+
+          # App config
+          pulumi config set awsRegion $AWS_REGION
+          pulumi config set s3Bucket ${{ secrets.S3_BUCKET }}
+          pulumi config set sqsQueueUrl ${{ secrets.SQS_QUEUE_URL }}
+          pulumi config set cdnDomain ${{ secrets.CDN_DOMAIN }}
+          pulumi config set alloyImageUri $ECR_BASE/image-pipeline/alloy:latest
           pulumi config set apiImageUri $ECR_BASE/image-pipeline/api:$VERSION
           pulumi config set workerImageUri $ECR_BASE/image-pipeline/worker:$VERSION
+
+          # Secrets
+          pulumi config set --secret mongoUri ${{ secrets.MONGO_URI }}
+          pulumi config set --secret jwtSecret ${{ secrets.JWT_SECRET }}
+          pulumi config set --secret grafanaApiKey ${{ secrets.GRAFANA_API_KEY }}
+
+      - name: Deploy infrastructure
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          cd infrastructure
           pulumi up --yes
 
       - name: Update API Gateway IP
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
-          # Wait for new ECS task to start
-          echo "waiting for new ECS task..."
-          aws ecs wait tasks-running \
+          # Wait for ECS deployment to stabilize (new task running, old task stopped)
+          echo "waiting for ECS deployment to stabilize..."
+          aws ecs wait services-stable \
             --cluster image-pipeline \
-            --tasks $(aws ecs list-tasks --cluster image-pipeline --service-name image-pipeline-api --query 'taskArns[0]' --output text) \
+            --services image-pipeline-api \
             --region $AWS_REGION
 
           ./scripts/update-api-gateway.sh
