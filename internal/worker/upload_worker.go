@@ -106,7 +106,13 @@ func (w *Worker) workerLoop(ctx context.Context, id int) {
 
 		jobCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
-		err = w.imageService.ProcessUpload(jobCtx, payload)
+		switch payload.Action {
+		case models.ActionTransform:
+			err = w.imageService.ProcessTransform(jobCtx, payload)
+		default:
+			// "compress" or empty (backwards compat)
+			err = w.imageService.ProcessUpload(jobCtx, payload)
+		}
 		cancel()
 
 		if err != nil {

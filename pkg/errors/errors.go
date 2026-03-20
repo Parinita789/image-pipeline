@@ -56,3 +56,15 @@ var (
 	ErrNoIDsProvided = New(http.StatusBadRequest, "NO_IDS", "no ids provided")
 	ErrTooManyIDs    = New(http.StatusBadRequest, "TOO_MANY_IDS", "too many ids — max 50 per request")
 )
+
+// Storage
+
+var (
+	ErrStorageQuotaExceeded = New(http.StatusRequestEntityTooLarge, "STORAGE_QUOTA_EXCEEDED", "storage quota exceeded")
+)
+
+// Transforms
+
+var (
+	ErrInvalidTransform = New(http.StatusBadRequest, "INVALID_TRANSFORM", "invalid transformation: %s")
+)

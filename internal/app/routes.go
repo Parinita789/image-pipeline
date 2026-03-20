@@ -50,7 +50,10 @@ func RegisterRoutes(
 		pr.With(middleware.IdempotencyCheck(idemRepo)).Post("/images/confirm", imageHandler.ConfirmUpload)
 		pr.Get("/images", imageHandler.GetImages)
 		pr.Get("/images/{requestId}", imageHandler.GetImageByRequestId)
+		pr.Post("/images/{id}/transform", imageHandler.TransformImage)
+		pr.Post("/images/{id}/cancel-transform", imageHandler.CancelTransform)
 		pr.Delete("/image/{id}", imageHandler.DeleteImage)
 		pr.Delete("/images", imageHandler.BatchDeleteImages)
+		pr.Get("/storage", imageHandler.GetStorageInfo)
 	})
 }

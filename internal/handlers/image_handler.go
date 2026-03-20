@@ -67,6 +67,16 @@ func (h *ImageHandler) PrepareUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check storage quota
+	var totalRequestSize int64
+	for _, f := range req.Files {
+		totalRequestSize += f.Size
+	}
+	if err := h.Service.CheckStorageQuota(ctx, userId, totalRequestSize); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
 	prepareFiles := make([]services.PrepareFile, len(req.Files))
 	for i, f := range req.Files {
 		prepareFiles[i] = services.PrepareFile{
@@ -252,6 +262,81 @@ func (h *ImageHandler) BatchDeleteImages(w http.ResponseWriter, r *http.Request)
 
 	log.Info("batch delete complete", zap.Int("deleted", len(result.Deleted)), zap.Int("failed", len(result.Failed)))
 	response.Success(w, fmt.Sprintf("%d deleted", len(result.Deleted)), result)
+}
+
+func (h *ImageHandler) TransformImage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.FromContext(ctx)
+	userId := middleware.GetUserID(r)
+	imageId := chi.URLParam(r, "id")
+
+	var req struct {
+		Transformations []string `json:"transformations"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.AppError(w, apperr.ErrInvalidJSON)
+		return
+	}
+
+	if len(req.Transformations) == 0 {
+		response.AppError(w, apperr.ErrInvalidTransform.Withf("none provided"))
+		return
+	}
+
+	for _, t := range req.Transformations {
+		if !services.IsValidTransform(t) {
+			response.AppError(w, apperr.ErrInvalidTransform.Withf(t))
+			return
+		}
+	}
+
+	updated, err := h.Service.TransformExistingImage(ctx, imageId, userId, req.Transformations)
+	if err != nil {
+		log.Error("failed to transform image", zap.Error(err))
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, "transform applied", updated)
+}
+
+func (h *ImageHandler) CancelTransform(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.FromContext(ctx)
+	userId := middleware.GetUserID(r)
+	imageId := chi.URLParam(r, "id")
+
+	if err := h.Service.CancelTransform(ctx, imageId, userId); err != nil {
+		log.Error("failed to cancel transform", zap.Error(err))
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, "transform cancelled", nil)
+}
+
+func (h *ImageHandler) GetStorageInfo(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := logger.FromContext(ctx)
+	userId := middleware.GetUserID(r)
+
+	user, err := h.Service.UserRepo.GetUserById(ctx, userId)
+	if err != nil {
+		log.Error("failed to get user for storage info", zap.Error(err))
+		response.AppError(w, apperr.ErrInternalServer)
+		return
+	}
+
+	var usedPercent float64
+	if user.StorageLimitBytes > 0 {
+		usedPercent = float64(user.StorageUsedBytes) / float64(user.StorageLimitBytes) * 100
+	}
+
+	response.Success(w, "storage info", map[string]any{
+		"usedBytes":   user.StorageUsedBytes,
+		"limitBytes":  user.StorageLimitBytes,
+		"usedPercent": usedPercent,
+	})
 }
 
 func isAllowedType(ct string) bool {

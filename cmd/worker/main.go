@@ -38,12 +38,12 @@ func main() {
 	}
 
 	// Create S3 Client
-	s3Client, _ := s3.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
+	s3Client, err := s3.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
 	if err != nil {
 		log.Fatal("S3 connection failed", zap.Error(err))
 	}
 	// Create SQS client
-	SQSClient, _ := queue.NewSQSClient(cfg.SQSQueueURL)
+	SQSClient, err := queue.NewSQSClient(cfg.SQSQueueURL)
 	if err != nil {
 		log.Fatal("SQS connection failed", zap.Error(err))
 	}
@@ -58,10 +58,13 @@ func main() {
 	imageRepo.CreateIndexes(context.Background())
 	idemRepo := repository.NewIdemRepo(db)
 
+	userRepo := repository.NewUserRepo(db)
+
 	// Service Layer
 	imageService := services.NewImageService(
 		imageRepo,
 		idemRepo,
+		userRepo,
 		s3Client,
 		s3Exec,
 		SQSClient,

@@ -25,18 +25,48 @@ func NewImageRepo(db *mongo.Database, exec resilence.Executor) *ImageRepo {
 }
 
 func (r *ImageRepo) Save(ctx context.Context, image models.Image) error {
+	setFields := bson.M{
+		"requestId":      image.RequestID,
+		"userId":         image.UserID,
+		"filename":       image.Filename,
+		"originalUrl":    image.OriginalURL,
+		"status":         "compressed",
+		"compressedUrl":  image.CompressedURL,
+		"originalSize":   image.OriginalSize,
+		"compressedSize": image.CompressedSize,
+	}
+	if len(image.Transformations) > 0 {
+		setFields["transformations"] = image.Transformations
+	}
+	if image.TransformedURL != "" {
+		setFields["transformedUrl"] = image.TransformedURL
+	}
 	_, err := r.Collection.UpdateOne(
 		ctx,
 		bson.M{"requestId": image.RequestID},
-		bson.M{"$setOnInsert": bson.M{
-			"requestId":     image.RequestID,
-			"userId":        image.UserID,
-			"filename":      image.Filename,
-			"originalUrl":   image.OriginalURL,
-			"status":        "compressed",
-			"compressedUrl": image.CompressedURL,
-			"createdAt":     time.Now(),
-		}},
+		bson.M{
+			"$set":         setFields,
+			"$setOnInsert": bson.M{"createdAt": time.Now()},
+		},
+		options.Update().SetUpsert(true),
+	)
+	return err
+}
+
+func (r *ImageRepo) CreateProcessingRecord(ctx context.Context, requestId, userId, filename, rawS3Key string) error {
+	_, err := r.Collection.UpdateOne(
+		ctx,
+		bson.M{"requestId": requestId},
+		bson.M{
+			"$setOnInsert": bson.M{
+				"requestId":   requestId,
+				"userId":      userId,
+				"filename":    filename,
+				"originalUrl": rawS3Key,
+				"status":      "processing",
+				"createdAt":   time.Now(),
+			},
+		},
 		options.Update().SetUpsert(true),
 	)
 	return err
@@ -87,6 +117,22 @@ func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, use
 		return cursor.All(ctx, &images)
 	})
 	return images, total, err
+}
+
+func (r *ImageRepo) FindById(ctx context.Context, id string) (*models.Image, error) {
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+	var img models.Image
+	err = r.Collection.FindOne(ctx, bson.M{"_id": objID}).Decode(&img)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &img, nil
 }
 
 func (r *ImageRepo) FindRequestById(ctx context.Context, requestId string) (*models.Image, error) {
@@ -161,6 +207,32 @@ func (r *ImageRepo) DeleteManyImages(ctx context.Context, ids []string, userId s
 		return err
 	})
 	return deleted, err
+}
+
+func (r *ImageRepo) SumStorageByUser(ctx context.Context, userId string) (int64, error) {
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"userId": userId}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":        nil,
+			"totalBytes": bson.M{"$sum": bson.M{"$add": []string{"$originalSize", "$compressedSize"}}},
+		}}},
+	}
+	cursor, err := r.Collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close(ctx)
+
+	var results []struct {
+		TotalBytes int64 `bson:"totalBytes"`
+	}
+	if err = cursor.All(ctx, &results); err != nil {
+		return 0, err
+	}
+	if len(results) == 0 {
+		return 0, nil
+	}
+	return results[0].TotalBytes, nil
 }
 
 func (r *ImageRepo) UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error) {

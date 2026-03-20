@@ -32,6 +32,9 @@ func (m *mockUserRepo) CreateUser(ctx context.Context, user *models.User) (strin
 func (m *mockUserRepo) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	return m.getUserByEmailFn(ctx, email)
 }
+func (m *mockUserRepo) SetDefaultQuota(ctx context.Context, userId string) error {
+	return nil
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

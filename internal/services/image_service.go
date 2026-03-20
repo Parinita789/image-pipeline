@@ -31,11 +31,19 @@ type IIdempotencyRepo interface {
 
 type IImageRepo interface {
 	Save(ctx context.Context, image models.Image) error
+	FindById(ctx context.Context, id string) (*models.Image, error)
 	FindRequestById(ctx context.Context, requestId string) (*models.Image, error)
 	GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
 	DeleteImage(ctx context.Context, id string) (*models.Image, error)
 	DeleteManyImages(ctx context.Context, ids []string, userId string) ([]models.Image, error)
 	UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error)
+	SumStorageByUser(ctx context.Context, userId string) (int64, error)
+	CreateProcessingRecord(ctx context.Context, requestId, userId, filename, rawS3Key string) error
+}
+
+type IUserRepo interface {
+	GetUserById(ctx context.Context, userId string) (*models.User, error)
+	UpdateStorageUsed(ctx context.Context, userId string, deltaBytes int64) error
 }
 
 type IS3Client interface {
@@ -55,6 +63,7 @@ type ISQSClient interface {
 type ImageService struct {
 	ImageRepo IImageRepo
 	IdemRepo  IIdempotencyRepo
+	UserRepo  IUserRepo
 	S3        IS3Client
 	s3Exec    resilence.Executor
 	sqsQueue  ISQSClient
@@ -94,6 +103,7 @@ type ConfirmFile struct {
 func NewImageService(
 	repo IImageRepo,
 	idemRepo IIdempotencyRepo,
+	userRepo IUserRepo,
 	s3 IS3Client,
 	s3Exec resilence.Executor,
 	sqsQueue ISQSClient,
@@ -103,6 +113,7 @@ func NewImageService(
 	return &ImageService{
 		ImageRepo: repo,
 		IdemRepo:  idemRepo,
+		UserRepo:  userRepo,
 		S3:        s3,
 		s3Exec:    s3Exec,
 		sqsQueue:  sqsQueue,
@@ -132,12 +143,30 @@ func (s *ImageService) PrepareUpload(ctx context.Context, userId string, files [
 	return result, nil
 }
 
+func (s *ImageService) CheckStorageQuota(ctx context.Context, userId string, incomingBytes int64) error {
+	user, err := s.UserRepo.GetUserById(ctx, userId)
+	if err != nil {
+		return err
+	}
+	if user.StorageLimitBytes > 0 && user.StorageUsedBytes+incomingBytes > user.StorageLimitBytes {
+		return apperr.ErrStorageQuotaExceeded
+	}
+	return nil
+}
+
 func (s *ImageService) ConfirmUpload(ctx context.Context, userId, idemKey string, files []ConfirmFile) (int, error) {
 	log := logger.FromContext(ctx)
 	enqueued := 0
 	for i, f := range files {
+		// Create a "processing" record immediately so the frontend can see it
+		if err := s.ImageRepo.CreateProcessingRecord(ctx, f.RequestID, userId, f.Filename, f.Key); err != nil {
+			log.Error("failed to create processing record", zap.Error(err))
+			// Non-fatal — the worker will create it via Save if this fails
+		}
+
 		fileIdemKey := fmt.Sprintf("%s-%d", idemKey, i)
 		msg := models.UploadMessage{
+			Action:         models.ActionCompress,
 			IdempotencyKey: fileIdemKey,
 			RequestId:      f.RequestID,
 			UserId:         userId,
@@ -226,11 +255,30 @@ func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessa
 
 	cdnUrl := s.toCDNUrl(compressedUrl)
 
-	if err = s.SaveMetaData(ctx, idemKey, msg.UserId, msg.FileName, rawUrl, cdnUrl); err != nil {
+	originalSize := int64(len(rawData))
+	compressedSize := int64(len(compressedData))
+
+	// Apply transforms if requested during initial upload
+	var transformedCdnUrl string
+	if len(msg.Transformations) > 0 {
+		transformedCdnUrl, err = s.applyAndUploadTransforms(ctx, compressedData, msg)
+		if err != nil {
+			log.Error("failed to apply transforms", zap.Error(err))
+		}
+	}
+
+	if err = s.SaveMetaData(ctx, idemKey, msg.UserId, msg.FileName, rawUrl, cdnUrl, originalSize, compressedSize, msg.Transformations, transformedCdnUrl); err != nil {
 		s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusFailed)
 		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
 		log.Error("failed to save metadata", zap.Error(err))
 		return err
+	}
+
+	// Update user storage
+	if s.UserRepo != nil {
+		if err = s.UserRepo.UpdateStorageUsed(ctx, msg.UserId, originalSize+compressedSize); err != nil {
+			log.Error("failed to update storage used", zap.Error(err))
+		}
 	}
 
 	if err = s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusCompleted); err != nil {
@@ -245,6 +293,209 @@ func (s *ImageService) ProcessUpload(ctx context.Context, msg models.UploadMessa
 		zap.String("compressed_url", compressedUrl),
 	)
 	return nil
+}
+
+func (s *ImageService) ProcessTransform(ctx context.Context, msg models.UploadMessage) error {
+	start := time.Now()
+	log := logger.FromContext(ctx)
+
+	log.Info("processing transform",
+		zap.String("requestId", msg.RequestId),
+		zap.String("idemKey", msg.IdempotencyKey),
+		zap.Strings("transforms", msg.Transformations),
+	)
+
+	// Check if the image is still in "processing" state — if not, it was cancelled
+	img, err := s.ImageRepo.FindRequestById(ctx, msg.RequestId)
+	if err != nil || img == nil {
+		log.Info("image not found for transform, skipping")
+		return nil // return nil so the SQS message gets deleted
+	}
+	if img.Status != "processing" {
+		log.Info("image no longer processing (cancelled?), skipping transform",
+			zap.String("status", img.Status))
+		return nil // message consumed, no action needed
+	}
+
+	// Download the source image (compressed key)
+	sourceData, err := s.downloadBytesFromS3(ctx, msg.RawS3Key)
+	if err != nil {
+		log.Error("failed to download source for transform", zap.Error(err))
+		// Revert status
+		s.updateImageStatusByRequestId(ctx, msg.RequestId, "compressed")
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
+		return err
+	}
+
+	// Apply transforms
+	transformedCdnUrl, err := s.applyAndUploadTransforms(ctx, sourceData, msg)
+	if err != nil {
+		log.Error("transform failed", zap.Error(err))
+		s.updateImageStatusByRequestId(ctx, msg.RequestId, "compressed")
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
+		return err
+	}
+
+	// Update the existing image record with transform results
+	img, err = s.ImageRepo.FindRequestById(ctx, msg.RequestId)
+	if err != nil || img == nil {
+		log.Error("failed to find image for transform update", zap.Error(err))
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
+		return err
+	}
+
+	_, err = s.ImageRepo.UpdateImage(ctx, img.ID.Hex(), bson.M{
+		"transformations": msg.Transformations,
+		"transformedUrl":  transformedCdnUrl,
+		"status":          "compressed",
+	})
+	if err != nil {
+		log.Error("failed to update image with transform results", zap.Error(err))
+		metrics.WorkerJobsTotal.WithLabelValues("failed").Inc()
+		return err
+	}
+
+	metrics.WorkerJobsTotal.WithLabelValues("completed").Inc()
+	metrics.WorkerJobDurationSeconds.Observe(time.Since(start).Seconds())
+
+	log.Info("transform job completed",
+		zap.String("requestId", msg.RequestId),
+		zap.String("transformedUrl", transformedCdnUrl),
+	)
+	return nil
+}
+
+func (s *ImageService) updateImageStatusByRequestId(ctx context.Context, requestId, status string) {
+	img, err := s.ImageRepo.FindRequestById(ctx, requestId)
+	if err != nil || img == nil {
+		return
+	}
+	s.ImageRepo.UpdateImage(ctx, img.ID.Hex(), bson.M{"status": status})
+}
+
+func (s *ImageService) applyAndUploadTransforms(ctx context.Context, compressedData []byte, msg models.UploadMessage) (string, error) {
+	img, format, err := image.Decode(bytes.NewReader(compressedData))
+	if err != nil {
+		return "", fmt.Errorf("decode for transforms: %w", err)
+	}
+
+	transformed, err := ApplyTransforms(img, msg.Transformations)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	switch format {
+	case "jpeg":
+		err = jpeg.Encode(&buf, transformed, &jpeg.Options{Quality: 90})
+	case "png":
+		err = png.Encode(&buf, transformed)
+	default:
+		return "", fmt.Errorf("unsupported format for transforms: %s", format)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	transformSuffix := strings.Join(msg.Transformations, "-")
+	transformedKey := fmt.Sprintf("transformed/%s/%s_%s_%s", msg.UserId, msg.IdempotencyKey, transformSuffix, msg.FileName)
+	transformedUrl, err := s.UploadToS3(ctx, transformedKey, buf.Bytes(), "transformed")
+	if err != nil {
+		return "", err
+	}
+	return s.toCDNUrl(transformedUrl), nil
+}
+
+func (s *ImageService) CancelTransform(ctx context.Context, imageId string, userId string) error {
+	log := logger.FromContext(ctx)
+
+	img, err := s.ImageRepo.FindById(ctx, imageId)
+	if err != nil {
+		return err
+	}
+	if img == nil {
+		return apperr.ErrImageNotFound
+	}
+	if img.UserID != userId {
+		return apperr.ErrImageForbidden
+	}
+	if img.Status != "processing" {
+		return nil // nothing to cancel
+	}
+
+	if _, err := s.ImageRepo.UpdateImage(ctx, imageId, bson.M{"status": "compressed"}); err != nil {
+		log.Error("failed to cancel transform", zap.Error(err))
+		return err
+	}
+
+	log.Info("transform cancelled", zap.String("imageId", imageId))
+	return nil
+}
+
+func (s *ImageService) TransformExistingImage(ctx context.Context, imageId string, userId string, transformations []string) (*models.Image, error) {
+	log := logger.FromContext(ctx)
+
+	img, err := s.ImageRepo.FindById(ctx, imageId)
+	if err != nil {
+		return nil, err
+	}
+	if img == nil {
+		return nil, apperr.ErrImageNotFound
+	}
+	if img.UserID != userId {
+		return nil, apperr.ErrImageForbidden
+	}
+	if img.Status == "processing" {
+		return nil, fmt.Errorf("image is already being processed")
+	}
+
+	// Use the compressed S3 key as the source
+	compressedKey := extractS3Key(img.CompressedURL)
+	if compressedKey == "" {
+		compressedKey = extractS3Key(img.OriginalURL)
+	}
+	if compressedKey == "" {
+		return nil, fmt.Errorf("no source image found")
+	}
+
+	// Download, transform, upload — all synchronously
+	sourceData, err := s.downloadBytesFromS3(ctx, compressedKey)
+	if err != nil {
+		log.Error("failed to download source for transform", zap.Error(err))
+		return nil, err
+	}
+
+	msg := models.UploadMessage{
+		IdempotencyKey:  fmt.Sprintf("transform-%s-%s", img.ID.Hex(), strings.Join(transformations, "-")),
+		RequestId:       img.RequestID,
+		UserId:          userId,
+		FileName:        img.Filename,
+		RawS3Key:        compressedKey,
+		Transformations: transformations,
+	}
+
+	transformedCdnUrl, err := s.applyAndUploadTransforms(ctx, sourceData, msg)
+	if err != nil {
+		log.Error("transform failed", zap.Error(err))
+		return nil, err
+	}
+
+	// Update MongoDB with the result
+	updated, err := s.ImageRepo.UpdateImage(ctx, imageId, bson.M{
+		"transformations": transformations,
+		"transformedUrl":  transformedCdnUrl,
+		"status":          "compressed",
+	})
+	if err != nil {
+		log.Error("failed to update image with transform results", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("transform completed",
+		zap.String("imageId", imageId),
+		zap.String("transformedUrl", transformedCdnUrl),
+	)
+	return updated, nil
 }
 
 func (s *ImageService) UploadToS3(ctx context.Context, key string, data []byte, imageType string) (string, error) {
@@ -300,16 +551,20 @@ func (s *ImageService) CompressImage(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (s *ImageService) SaveMetaData(ctx context.Context, requestID, userID, filename, rawURL, compressedUrl string) error {
+func (s *ImageService) SaveMetaData(ctx context.Context, requestID, userID, filename, rawURL, compressedUrl string, originalSize, compressedSize int64, transformations []string, transformedUrl string) error {
 	log := logger.FromContext(ctx)
-	image := models.Image{
-		RequestID:     requestID,
-		UserID:        userID,
-		Filename:      filename,
-		OriginalURL:   rawURL,
-		CompressedURL: compressedUrl,
+	img := models.Image{
+		RequestID:       requestID,
+		UserID:          userID,
+		Filename:        filename,
+		OriginalURL:     rawURL,
+		CompressedURL:   compressedUrl,
+		OriginalSize:    originalSize,
+		CompressedSize:  compressedSize,
+		Transformations: transformations,
+		TransformedURL:  transformedUrl,
 	}
-	if err := s.ImageRepo.Save(ctx, image); err != nil {
+	if err := s.ImageRepo.Save(ctx, img); err != nil {
 		log.Error("image save failed", zap.Error(err))
 		return err
 	}
@@ -362,6 +617,16 @@ func (s *ImageService) DeleteImage(ctx context.Context, id string, userId string
 		}
 	}
 
+	// Decrement user storage
+	if s.UserRepo != nil {
+		totalSize := img.OriginalSize + img.CompressedSize
+		if totalSize > 0 {
+			if err = s.UserRepo.UpdateStorageUsed(ctx, userId, -totalSize); err != nil {
+				log.Error("failed to decrement storage", zap.Error(err))
+			}
+		}
+	}
+
 	log.Info("image deleted", zap.String("id", id))
 	return nil
 }
@@ -403,8 +668,17 @@ func (s *ImageService) BatchDeleteImages(ctx context.Context, ids []string, user
 	}
 
 	deleted := make([]string, 0, len(imgs))
+	var totalSize int64
 	for _, img := range imgs {
 		deleted = append(deleted, img.ID.Hex())
+		totalSize += img.OriginalSize + img.CompressedSize
+	}
+
+	// Decrement user storage
+	if s.UserRepo != nil && totalSize > 0 && userId != "" {
+		if err = s.UserRepo.UpdateStorageUsed(ctx, userId, -totalSize); err != nil {
+			log.Error("failed to decrement storage after batch delete", zap.Error(err))
+		}
 	}
 
 	return &BatchDeleteResult{Deleted: deleted, Failed: failedKeys}, nil

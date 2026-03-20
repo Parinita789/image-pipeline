@@ -18,7 +18,6 @@ type SQSClient struct {
 }
 
 func NewSQSClient(queueURL string) (*SQSClient, error) {
-	// using localstack
 	opts := []func(*config.LoadOptions) error{}
 
 	if endpoint := os.Getenv("AWS_ENDPOINT_URL"); endpoint != "" {
@@ -29,10 +28,9 @@ func NewSQSClient(queueURL string) (*SQSClient, error) {
 		))
 	}
 
-	cfg, err := config.LoadDefaultConfig(context.Background())
-
+	cfg, err := config.LoadDefaultConfig(context.Background(), opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sqs config load failed: %w", err)
 	}
 
 	client := sqs.NewFromConfig(cfg)

@@ -154,7 +154,7 @@ func setupSuite(ctx context.Context) (*suite, error) {
 	userRepo := repository.NewUserRepo(s.db)
 
 	jwtSecret := "integration-test-secret"
-	imageService := services.NewImageService(imageRepo, idemRepo, s.s3Client, exec, s.sqsClient, exec, "")
+	imageService := services.NewImageService(imageRepo, idemRepo, userRepo, s.s3Client, exec, s.sqsClient, exec, "")
 	authService := authpkg.NewAuthService(userRepo, jwtSecret)
 	authHandler := authpkg.NewAuthHandler(authService)
 	imageHandler := handlers.NewImageHandler(imageService)

@@ -86,8 +86,38 @@ func (m *mockImageRepo) FindRequestById(ctx context.Context, requestId string) (
 	}
 	return nil, nil
 }
+func (m *mockImageRepo) FindById(ctx context.Context, id string) (*models.Image, error) {
+	if m.findRequestByIdFn != nil {
+		return m.findRequestByIdFn(ctx, id)
+	}
+	return nil, nil
+}
 func (m *mockImageRepo) DeleteManyImages(ctx context.Context, ids []string, userId string) ([]models.Image, error) {
 	return nil, nil
+}
+func (m *mockImageRepo) SumStorageByUser(ctx context.Context, userId string) (int64, error) {
+	return 0, nil
+}
+func (m *mockImageRepo) CreateProcessingRecord(ctx context.Context, requestId, userId, filename, rawS3Key string) error {
+	return nil
+}
+
+type mockUserRepo struct {
+	getUserByIdFn      func(ctx context.Context, userId string) (*models.User, error)
+	updateStorageUsedFn func(ctx context.Context, userId string, deltaBytes int64) error
+}
+
+func (m *mockUserRepo) GetUserById(ctx context.Context, userId string) (*models.User, error) {
+	if m.getUserByIdFn != nil {
+		return m.getUserByIdFn(ctx, userId)
+	}
+	return &models.User{StorageLimitBytes: 1 << 30}, nil
+}
+func (m *mockUserRepo) UpdateStorageUsed(ctx context.Context, userId string, deltaBytes int64) error {
+	if m.updateStorageUsedFn != nil {
+		return m.updateStorageUsedFn(ctx, userId, deltaBytes)
+	}
+	return nil
 }
 
 type mockS3Client struct {
@@ -177,6 +207,7 @@ func buildServiceWithCDN(idem *mockIdemRepo, imgRepo *mockImageRepo, s3 *mockS3C
 	return &ImageService{
 		ImageRepo: imgRepo,
 		IdemRepo:  idem,
+		UserRepo:  &mockUserRepo{},
 		S3:        s3,
 		s3Exec:    exec,
 		sqsQueue:  sqs,

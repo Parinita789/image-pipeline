@@ -17,6 +17,7 @@ import (
 type IUserRepo interface {
 	CreateUser(ctx context.Context, user *models.User) (string, error)
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
+	SetDefaultQuota(ctx context.Context, userId string) error
 }
 
 type RegisterRequest struct {
@@ -60,6 +61,13 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (strin
 		metrics.AuthRegistrationsTotal.WithLabelValues("failed").Inc()
 		return "", apperr.ErrRegistrationFailed
 	}
+
+	// Set default storage quota (1 GB)
+	if err := s.UserRepo.SetDefaultQuota(ctx, result); err != nil {
+		log := logger.FromContext(ctx)
+		log.Error("failed to set default quota", zap.String("userId", result), zap.Error(err))
+	}
+
 	metrics.AuthRegistrationsTotal.WithLabelValues("success").Inc()
 	return result, nil
 }

@@ -48,12 +48,12 @@ func NewApp() *App {
 	}
 
 	// Create S3 Client
-	s3Client, _ := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
+	s3Client, err := s3client.NewS3Client(cfg.AWSRegion, cfg.S3Bucket)
 	if err != nil {
 		log.Fatal("S3 connection failed", zap.Error(err))
 	}
 	// Create SQS client
-	SQSClient, _ := queue.NewSQSClient(cfg.SQSQueueURL)
+	SQSClient, err := queue.NewSQSClient(cfg.SQSQueueURL)
 	if err != nil {
 		log.Fatal("SQS connection failed", zap.Error(err))
 	}
@@ -73,6 +73,7 @@ func NewApp() *App {
 	imageService := services.NewImageService(
 		imageRepo,
 		idemRepo,
+		userRepo,
 		s3Client,
 		s3Exec,
 		SQSClient,
