@@ -2,6 +2,8 @@
 
 Production-grade async image processing pipeline built with Go and AWS. Users upload images via presigned S3 URLs — file bytes never touch the API server — and a background worker compresses them and serves via CloudFront CDN.
 
+**Live Demo:** [https://d3vldc1umh6ksf.cloudfront.net](https://d3vldc1umh6ksf.cloudfront.net)
+
 ## Architecture
 
 ```

@@ -41,6 +41,12 @@ import (
 	"image-pipeline/internal/services"
 )
 
+// ─── No-op email service for tests ───────────────────────────────────────────
+
+type noopEmailService struct{}
+
+func (n *noopEmailService) SendPasswordResetEmail(toEmail, token string) error { return nil }
+
 // ─── Test Suite ───────────────────────────────────────────────────────────────
 
 type suite struct {
@@ -157,7 +163,7 @@ func setupSuite(ctx context.Context) (*suite, error) {
 	batchRepo := repository.NewBatchRepo(s.db)
 	imageService := services.NewImageService(imageRepo, idemRepo, userRepo, batchRepo, s.s3Client, exec, s.sqsClient, exec, "")
 	resetRepo := repository.NewPasswordResetRepo(s.db)
-	authService := authpkg.NewAuthService(userRepo, resetRepo, jwtSecret)
+	authService := authpkg.NewAuthService(userRepo, resetRepo, &noopEmailService{}, jwtSecret)
 	authHandler := authpkg.NewAuthHandler(authService)
 	imageHandler := handlers.NewImageHandler(imageService)
 
@@ -580,7 +586,7 @@ func TestIntegration_GetImages_NoAuth_Returns401(t *testing.T) {
 func TestIntegration_GetImages_WithAuth_Returns200(t *testing.T) {
 	token := registerAndLogin(t, "getimages@example.com", "Password1!")
 
-	req := httptest.NewRequest(http.MethodGet, "/images?page=1&limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/images?limit=10", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	ts.router.ServeHTTP(rr, req)
@@ -590,14 +596,14 @@ func TestIntegration_GetImages_WithAuth_Returns200(t *testing.T) {
 	}
 	var resp struct {
 		Data struct {
-			Images []interface{} `json:"images"`
-			Total  int64         `json:"total"`
-			Page   int           `json:"page"`
-			Limit  int           `json:"limit"`
+			Images     []interface{} `json:"images"`
+			Total      int64         `json:"total"`
+			NextCursor string        `json:"nextCursor"`
+			Limit      int           `json:"limit"`
 		} `json:"data"`
 	}
 	json.NewDecoder(rr.Body).Decode(&resp)
-	if resp.Data.Limit != 10 || resp.Data.Page != 1 {
-		t.Errorf("unexpected pagination: page=%d limit=%d", resp.Data.Page, resp.Data.Limit)
+	if resp.Data.Limit != 10 {
+		t.Errorf("unexpected pagination: limit=%d", resp.Data.Limit)
 	}
 }

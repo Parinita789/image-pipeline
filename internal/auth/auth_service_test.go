@@ -55,13 +55,19 @@ func (m *mockResetRepo) InvalidateAllForUser(ctx context.Context, userID primiti
 	return nil
 }
 
+// ─── EmailService Mock ──────────────────────────────────────────────────────
+
+type mockEmailService struct{}
+
+func (m *mockEmailService) SendPasswordResetEmail(toEmail, token string) error { return nil }
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 func buildAuthService(repo *mockUserRepo) *AuthService {
 	if repo == nil {
 		repo = &mockUserRepo{}
 	}
-	return NewAuthService(repo, &mockResetRepo{}, "test-secret-key")
+	return NewAuthService(repo, &mockResetRepo{}, &mockEmailService{}, "test-secret-key")
 }
 
 // hashPassword pre-hashes a password to seed mock user responses
