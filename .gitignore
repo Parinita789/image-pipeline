@@ -4,6 +4,7 @@
 .pulumi/
 
 # Go build artifacts
+main
 infrastructure/image-pipeline-infra
 
 # Pulumi stack
