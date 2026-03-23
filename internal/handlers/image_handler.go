@@ -187,12 +187,12 @@ func (h *ImageHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
 
 // GetImages godoc
 // @Summary      List images
-// @Description  Get a paginated list of the authenticated user's images. Supports search and status filtering.
+// @Description  Get a cursor-paginated list of the authenticated user's images. Pass the `nextCursor` value from the previous response as `cursor` to fetch the next page.
 // @Tags         Images
 // @Security     BearerAuth
 // @Produce      json
-// @Param        page    query   int     false  "Page number"   default(1)
-// @Param        limit   query   int     false  "Items per page (max 100)"  default(10)
+// @Param        cursor  query   string  false  "Cursor (last image ID from previous page)"
+// @Param        limit   query   int     false  "Items per page (max 100)"  default(20)
 // @Param        search  query   string  false  "Search by filename"
 // @Param        status  query   string  false  "Filter by status"
 // @Success      200  {object}  docs.APIResponse{data=docs.PaginatedImages}
@@ -203,16 +203,13 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 	log := logger.FromContext(ctx)
 	log.Info("fetching images...")
 
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	cursor := r.URL.Query().Get("cursor")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	search := r.URL.Query().Get("search")
 	status := r.URL.Query().Get("status")
 
-	if page == 0 {
-		page = 1
-	}
 	if limit == 0 {
-		limit = 10
+		limit = 20
 	}
 	if limit > 100 {
 		limit = 100
@@ -221,7 +218,7 @@ func (h *ImageHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 	userId := middleware.GetUserID(r)
 	filters := models.ImageFilters{Search: search, Status: status}
 
-	paginatedResponse, err := h.Service.GetImages(ctx, page, limit, userId, filters)
+	paginatedResponse, err := h.Service.GetImages(ctx, cursor, limit, userId, filters)
 	if err != nil {
 		log.Error("failed to get images", zap.Error(err))
 		response.AppError(w, apperr.ErrImageFetchFailed)

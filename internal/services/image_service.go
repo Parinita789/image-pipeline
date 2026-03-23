@@ -37,7 +37,7 @@ type IImageRepo interface {
 	Save(ctx context.Context, image models.Image) error
 	FindById(ctx context.Context, id string) (*models.Image, error)
 	FindRequestById(ctx context.Context, requestId string) (*models.Image, error)
-	GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
+	GetPaginatedImages(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
 	DeleteImage(ctx context.Context, id string) (*models.Image, error)
 	DeleteManyImages(ctx context.Context, ids []string, userId string) ([]models.Image, error)
 	UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error)
@@ -87,10 +87,10 @@ type ImageService struct {
 }
 
 type PaginatedResponse struct {
-	Total  int64          `json:"total"`
-	Page   int            `json:"page"`
-	Limit  int            `json:"limit"`
-	Images []models.Image `json:"images"`
+	Total      int64          `json:"total"`
+	Images     []models.Image `json:"images"`
+	NextCursor string         `json:"nextCursor,omitempty"`
+	Limit      int            `json:"limit"`
 }
 
 // PrepareFile is the per-file input for PrepareUpload.
@@ -756,14 +756,20 @@ func (s *ImageService) markImageFailed(_ context.Context, requestId, idemKey str
 
 const processingTimeout = 5 * time.Minute
 
-func (s *ImageService) GetImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) (*PaginatedResponse, error) {
+func (s *ImageService) GetImages(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) (*PaginatedResponse, error) {
 	s.ImageRepo.ExpireStuckProcessing(ctx, userId, processingTimeout)
 
-	images, total, err := s.ImageRepo.GetPaginatedImages(ctx, page, limit, userId, filters)
+	images, total, err := s.ImageRepo.GetPaginatedImages(ctx, cursor, limit, userId, filters)
 	if err != nil {
 		return nil, err
 	}
-	return &PaginatedResponse{Total: total, Page: page, Limit: limit, Images: images}, nil
+
+	var nextCursor string
+	if len(images) == limit {
+		nextCursor = images[len(images)-1].ID.Hex()
+	}
+
+	return &PaginatedResponse{Total: total, Images: images, NextCursor: nextCursor, Limit: limit}, nil
 }
 
 func (s *ImageService) DeleteImage(ctx context.Context, id string, userId string) error {

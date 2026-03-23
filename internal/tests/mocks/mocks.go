@@ -37,7 +37,7 @@ type MockImageRepo struct {
 	SaveFn                    func(ctx context.Context, image models.Image) error
 	FindByIdFn                func(ctx context.Context, id string) (*models.Image, error)
 	FindRequestByIdFn         func(ctx context.Context, requestId string) (*models.Image, error)
-	GetPaginatedImagesFn      func(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
+	GetPaginatedImagesFn      func(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
 	DeleteImageFn             func(ctx context.Context, id string) (*models.Image, error)
 	DeleteManyImagesFn        func(ctx context.Context, ids []string, userId string) ([]models.Image, error)
 	UpdateImageFn             func(ctx context.Context, id string, update bson.M) (*models.Image, error)
@@ -58,8 +58,8 @@ func (m *MockImageRepo) FindById(ctx context.Context, id string) (*models.Image,
 func (m *MockImageRepo) FindRequestById(ctx context.Context, requestId string) (*models.Image, error) {
 	return m.FindRequestByIdFn(ctx, requestId)
 }
-func (m *MockImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
-	return m.GetPaginatedImagesFn(ctx, page, limit, userId, filters)
+func (m *MockImageRepo) GetPaginatedImages(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
+	return m.GetPaginatedImagesFn(ctx, cursor, limit, userId, filters)
 }
 func (m *MockImageRepo) DeleteImage(ctx context.Context, id string) (*models.Image, error) {
 	return m.DeleteImageFn(ctx, id)

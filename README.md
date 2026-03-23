@@ -68,7 +68,7 @@ The architecture is designed for horizontal scalability — the API and worker a
 
 **What needs tuning for production load:**
 - **Worker throughput** — currently 5 workers on a single ECS instance; scale by increasing `WORKER_COUNT` and adding ECS auto-scaling based on SQS queue depth
-- **MongoDB** — single instance; would need replica set with read replicas, connection pool tuning, and cursor-based pagination (currently skip-based)
+- **MongoDB** — single instance; would need replica set with read replicas, connection pool tuning.
 - **Caching** — no Redis layer; user lookups and storage quota checks hit MongoDB on every request
 
 ## API Documentation

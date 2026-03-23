@@ -103,7 +103,7 @@ func (r *ImageRepo) CreateIndexes(ctx context.Context) error {
 	return err
 }
 
-func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
+func (r *ImageRepo) GetPaginatedImages(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
 	var images []models.Image
 	var total int64
 
@@ -118,24 +118,44 @@ func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, use
 			filter["status"] = filters.Status
 		}
 
-		count, err := r.Collection.CountDocuments(ctx, filter)
+		// Cursor-based: fetch documents with _id < cursor (newest first).
+		// ObjectIDs are time-ordered so _id desc == createdAt desc.
+		if cursor != "" {
+			cursorID, err := primitive.ObjectIDFromHex(cursor)
+			if err == nil {
+				filter["_id"] = bson.M{"$lt": cursorID}
+			}
+		}
+
+		count, err := r.Collection.CountDocuments(ctx, baseFilter(userId, filters))
 		if err != nil {
 			return err
 		}
 		total = count
 
 		opts := options.Find().
-			SetSkip(int64((page - 1) * limit)).
 			SetLimit(int64(limit)).
-			SetSort(bson.M{"createdAt": -1})
+			SetSort(bson.M{"_id": -1})
 
-		cursor, err := r.Collection.Find(ctx, filter, opts)
+		cur, err := r.Collection.Find(ctx, filter, opts)
 		if err != nil {
 			return err
 		}
-		return cursor.All(ctx, &images)
+		return cur.All(ctx, &images)
 	})
 	return images, total, err
+}
+
+// baseFilter builds the filter without cursor for counting total documents.
+func baseFilter(userId string, filters models.ImageFilters) bson.M {
+	filter := bson.M{"userId": userId}
+	if filters.Search != "" {
+		filter["filename"] = bson.M{"$regex": filters.Search, "$options": "i"}
+	}
+	if filters.Status != "" {
+		filter["status"] = filters.Status
+	}
+	return filter
 }
 
 func (r *ImageRepo) FindById(ctx context.Context, id string) (*models.Image, error) {

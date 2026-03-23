@@ -50,7 +50,7 @@ func (m *mockIdemRepo) Acquire(ctx context.Context, key, hash string) (*models.I
 
 type mockImageRepo struct {
 	saveFn               func(ctx context.Context, image models.Image) error
-	getPaginatedImagesFn func(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
+	getPaginatedImagesFn func(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
 	deleteImageFn        func(ctx context.Context, id string) (*models.Image, error)
 	updateImageFn        func(ctx context.Context, id string, update bson.M) (*models.Image, error)
 	findRequestByIdFn    func(ctx context.Context, requestId string) (*models.Image, error)
@@ -62,9 +62,9 @@ func (m *mockImageRepo) Save(ctx context.Context, img models.Image) error {
 	}
 	return nil
 }
-func (m *mockImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
+func (m *mockImageRepo) GetPaginatedImages(ctx context.Context, cursor string, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
 	if m.getPaginatedImagesFn != nil {
-		return m.getPaginatedImagesFn(ctx, page, limit, userId, filters)
+		return m.getPaginatedImagesFn(ctx, cursor, limit, userId, filters)
 	}
 	return nil, 0, nil
 }
@@ -843,12 +843,12 @@ func TestGetImages_ReturnsPaginatedResult(t *testing.T) {
 	}
 
 	svc := buildService(nil, &mockImageRepo{
-		getPaginatedImagesFn: func(_ context.Context, _, _ int, _ string, _ models.ImageFilters) ([]models.Image, int64, error) {
+		getPaginatedImagesFn: func(_ context.Context, _ string, _ int, _ string, _ models.ImageFilters) ([]models.Image, int64, error) {
 			return expected, 2, nil
 		},
 	}, nil, nil)
 
-	resp, err := svc.GetImages(newTestCtx(), 1, 10, "user-1", models.ImageFilters{})
+	resp, err := svc.GetImages(newTestCtx(), "", 10, "user-1", models.ImageFilters{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -859,12 +859,12 @@ func TestGetImages_ReturnsPaginatedResult(t *testing.T) {
 
 func TestGetImages_RepoFails_ReturnsError(t *testing.T) {
 	svc := buildService(nil, &mockImageRepo{
-		getPaginatedImagesFn: func(_ context.Context, _, _ int, _ string, _ models.ImageFilters) ([]models.Image, int64, error) {
+		getPaginatedImagesFn: func(_ context.Context, _ string, _ int, _ string, _ models.ImageFilters) ([]models.Image, int64, error) {
 			return nil, 0, errors.New("db error")
 		},
 	}, nil, nil)
 
-	_, err := svc.GetImages(newTestCtx(), 1, 10, "user-1", models.ImageFilters{})
+	_, err := svc.GetImages(newTestCtx(), "", 10, "user-1", models.ImageFilters{})
 	if err == nil {
 		t.Fatal("expected error when repo fails")
 	}
