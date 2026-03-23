@@ -32,7 +32,26 @@ func (m *mockUserRepo) CreateUser(ctx context.Context, user *models.User) (strin
 func (m *mockUserRepo) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	return m.getUserByEmailFn(ctx, email)
 }
+func (m *mockUserRepo) GetUserById(ctx context.Context, userId string) (*models.User, error) {
+	return nil, nil
+}
+func (m *mockUserRepo) UpdatePassword(ctx context.Context, userId string, hashedPassword string) error {
+	return nil
+}
 func (m *mockUserRepo) SetDefaultQuota(ctx context.Context, userId string) error {
+	return nil
+}
+
+// ─── PasswordResetRepo Mock ─────────────────────────────────────────────────
+
+type mockResetRepo struct{}
+
+func (m *mockResetRepo) Create(ctx context.Context, reset *models.PasswordReset) error { return nil }
+func (m *mockResetRepo) FindValidToken(ctx context.Context, tokenHash string) (*models.PasswordReset, error) {
+	return nil, nil
+}
+func (m *mockResetRepo) MarkUsed(ctx context.Context, id primitive.ObjectID) error { return nil }
+func (m *mockResetRepo) InvalidateAllForUser(ctx context.Context, userID primitive.ObjectID) error {
 	return nil
 }
 
@@ -42,7 +61,7 @@ func buildAuthService(repo *mockUserRepo) *AuthService {
 	if repo == nil {
 		repo = &mockUserRepo{}
 	}
-	return NewAuthService(repo, "test-secret-key")
+	return NewAuthService(repo, &mockResetRepo{}, "test-secret-key")
 }
 
 // hashPassword pre-hashes a password to seed mock user responses
@@ -60,7 +79,7 @@ func hashPassword(t *testing.T, plain string) string {
 func TestRegister_HappyPath(t *testing.T) {
 	svc := buildAuthService(&mockUserRepo{
 		createUserFn: func(_ context.Context, user *models.User) (string, error) {
-			if user.Password == "password123" {
+			if user.Password == "Password1!" {
 				t.Error("password should be hashed, not stored as plaintext")
 			}
 			return "new-user-id", nil
@@ -71,7 +90,7 @@ func TestRegister_HappyPath(t *testing.T) {
 		FirstName: "Jane",
 		LastName:  "Doe",
 		Email:     "jane@example.com",
-		Password:  "password123",
+		Password:  "Password1!",
 	})
 
 	if err != nil {
@@ -93,7 +112,7 @@ func TestRegister_DuplicateEmail_ReturnsError(t *testing.T) {
 		FirstName: "Jane",
 		LastName:  "Doe",
 		Email:     "existing@example.com",
-		Password:  "password123",
+		Password:  "Password1!",
 	})
 
 	if err == nil {
@@ -116,19 +135,19 @@ func TestRegister_PasswordIsHashed(t *testing.T) {
 
 	_, err := svc.Register(testCtx(), &RegisterRequest{
 		Email:    "jane@example.com",
-		Password: "mysecret",
+		Password: "MySecret1!",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// saved value must not be the plaintext
-	if savedHash == "mysecret" {
+	if savedHash == "MySecret1!" {
 		t.Fatal("password stored as plaintext — must be hashed")
 	}
 
 	// saved value must be a valid bcrypt hash of the original password
-	if err := bcrypt.CompareHashAndPassword([]byte(savedHash), []byte("mysecret")); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(savedHash), []byte("MySecret1!")); err != nil {
 		t.Fatalf("saved value is not a valid bcrypt hash of the original password: %v", err)
 	}
 }
@@ -142,7 +161,7 @@ func TestRegister_RepoFails_ReturnsError(t *testing.T) {
 
 	_, err := svc.Register(testCtx(), &RegisterRequest{
 		Email:    "jane@example.com",
-		Password: "password123",
+		Password: "Password1!",
 	})
 
 	if err == nil {

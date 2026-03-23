@@ -177,10 +177,9 @@ func (c *S3Client) DeleteObjects(ctx context.Context, keys []string) ([]string, 
 func (s *S3Client) PresignPutObject(ctx context.Context, key, contentType string, size int64, expiry time.Duration) (string, error) {
 	presignClient := s3.NewPresignClient(s.S3)
 	req, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(s.Bucket),
-		Key:           aws.String(key),
-		ContentType:   aws.String(contentType),
-		ContentLength: aws.Int64(size),
+		Bucket:      aws.String(s.Bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
 	}, func(opts *s3.PresignOptions) {
 		opts.Expires = expiry
 	})

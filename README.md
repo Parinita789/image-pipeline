@@ -29,47 +29,60 @@ Browser                              AWS
   │                              │ serve via CloudFront CDN
 ```
 
-## Stack
+## Tech Stack
 
-### Backend
-- **Go** — chi router, zap structured logging
-- **AWS** — S3 (storage + presigned URLs), SQS (job queue), CloudFront (CDN + frontend hosting), ECS Fargate, API Gateway, Secrets Manager
-- **MongoDB** — metadata, idempotency tracking, user accounts
+| Layer | Technology |
+|-------|------------|
+| Language | Go 1.25 |
+| Router | Chi v5 |
+| Database | MongoDB 7 |
+| Queue | AWS SQS |
+| Storage | AWS S3 (presigned URLs) |
+| CDN | CloudFront |
+| Auth | JWT (HS256, 24h expiry) |
+| Logging | Zap (structured) + CloudWatch |
+| Metrics | Prometheus + Grafana Alloy sidecar |
+| Infrastructure | Pulumi (Go), ECS Fargate, API Gateway |
+| CI/CD | GitHub Actions |
 
-### Frontend
-- **React** + TypeScript + Vite (separate repo)
-- Deployed to S3 + CloudFront
-- Single CloudFront distribution serves both frontend and API (`/api/*` routes to backend)
+## Features
 
-### Infrastructure
-- **Pulumi** (Go) — all AWS resources as code
-- **GitHub Actions** — CI/CD pipeline (test → build → deploy)
+- **Presigned S3 uploads** — file bytes never reach the API server; browsers upload directly to S3
+- **Async processing** — uploads enqueued to SQS, processed by a scalable worker pool
+- **Image compression** — JPEG (Q60) and PNG (best) compression
+- **Transformations** — resize, crop, grayscale, sepia, blur, sharpen, invert, watermark, format conversion, background removal
+- **Batch operations** — batch transform, batch revert, batch delete (up to 50 per request)
+- **Idempotency** — safe request retry via `X-Idempotency-Key` header
+- **Rate limiting** — token bucket per user (5 tokens/sec, burst 10)
+- **Storage quotas** — per-user storage limits with usage tracking
+- **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs
 
-## API Endpoints
+## API Documentation
 
-### Public
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| POST | `/auth/register` | Register a new user |
-| POST | `/auth/login` | Login, returns JWT |
+Full API documentation is available via **Swagger UI**:
 
-### Protected (JWT required)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/images/prepare` | Get presigned S3 PUT URLs for files |
-| POST | `/images/confirm` | Confirm upload, enqueue processing (requires `X-Idempotency-Key`) |
-| GET | `/images` | List images (paginated, filterable by search/status) |
-| GET | `/images/{requestId}` | Get single image by request ID |
-| DELETE | `/image/{id}` | Delete a single image |
-| DELETE | `/images` | Batch delete up to 50 images |
+```
+http://localhost:8080/swagger/index.html
+```
+
+The OpenAPI spec covers all endpoints including auth, image upload/management, transformations, batch operations, and storage. The spec files live in [`docs/`](docs/):
+
+- [`docs/swagger.yaml`](docs/swagger.yaml) — OpenAPI 2.0 spec
+- [`docs/swagger.json`](docs/swagger.json) — JSON format
+
+Regenerate after modifying handler annotations:
+
+```bash
+swag init -g cmd/api/main.go -o docs
+```
 
 ## Setup
 
 ### Prerequisites
+
 - Go 1.25+
 - MongoDB
-- AWS account (S3 bucket, SQS queue, CloudFront distribution)
+- AWS account (S3 bucket, SQS queue, CloudFront distribution) or Docker for local dev
 
 ### Environment Variables
 
@@ -98,9 +111,11 @@ go run cmd/worker/main.go
 ### Running with Docker
 
 ```bash
-# Full stack (MongoDB, LocalStack, API, Worker)
+# Full stack: MongoDB, LocalStack (S3 + SQS), API, Worker
 docker compose up --build
 ```
+
+LocalStack replaces AWS services locally — S3 bucket and SQS queue are auto-provisioned via `scripts/localstack-init.sh`.
 
 ## Upload Flow
 
@@ -135,73 +150,57 @@ image-pipeline/
 │   ├── app/                     # App init, routes, graceful shutdown
 │   ├── auth/                    # JWT auth handler + service
 │   ├── config/                  # Env config loader
-│   ├── handlers/                # HTTP handlers
+│   ├── dto/                     # Data transfer objects
+│   ├── handlers/                # HTTP handlers (Swagger-annotated)
 │   ├── logger/                  # Zap structured logging
-│   ├── middleware/              # Rate limiting, request ID, logging, idempotency
+│   ├── metrics/                 # Prometheus metric definitions
+│   ├── middleware/              # Rate limiting, request ID, logging, idempotency, metrics
 │   ├── models/                  # Domain models
 │   ├── queue/                   # SQS publisher + consumer
 │   ├── repository/              # MongoDB data access (repository pattern)
-│   ├── resilence/               # Retry with exponential backoff
+│   ├── resilence/               # Retry with exponential backoff + circuit breaker
 │   ├── s3/                      # S3 client (stream upload/download, presign, bulk delete)
 │   ├── services/                # Business logic
-│   ├── tests/integration/       # Integration tests (testcontainers)
+│   ├── tests/                   # Integration tests (testcontainers) + mocks
+│   ├── utils/                   # Idempotency hashing, retry helpers
 │   └── worker/                  # SQS polling + image processing pool
 ├── pkg/
-│   ├── response/                # Unified JSON response envelope
-│   ├── request/                 # Request parsing
-│   ├── validator/               # Input validation
+│   ├── errors/                  # Centralized AppError types
 │   ├── pagination/              # Pagination helpers
-│   └── errors/                  # Custom error types
-├── infrastructure/              # Pulumi IaC (Go)
-│   ├── main.go                  # Entrypoint — config, orchestration
-│   ├── vpc.go                   # VPC, subnet, IGW, security group
-│   ├── ecs.go                   # ECS cluster
-│   ├── tasks.go                 # Task definitions + services (API, Worker, Alloy sidecar)
-│   ├── iam.go                   # Execution role + task role
-│   ├── secrets.go               # AWS Secrets Manager + IAM policy
-│   ├── cloudwatch.go            # Log groups
-│   ├── api_gateway.go           # HTTP API Gateway → ECS
-│   ├── frontend.go              # S3 + CloudFront (frontend hosting + API proxy)
-│   └── Pulumi.prod.yaml         # Stack config (secrets encrypted)
-├── monitoring/
-│   └── alloy/
-│       ├── config.river         # Prometheus scrape + remote write to Grafana Cloud
-│       └── Dockerfile
-├── scripts/
-│   ├── localstack-init.sh       # Creates S3 bucket (with CORS) + SQS queue
-│   ├── dev.sh                   # Docker compose rebuild
-│   ├── push.sh                  # Build & push API/Worker images to ECR + deploy
-│   ├── deploy-frontend.sh       # Build frontend, sync to S3, invalidate CloudFront
-│   └── update-api-gateway.sh    # Fetch current ECS task IP for API Gateway
-├── .github/workflows/
-│   └── deploy.yml               # CI/CD: test → build → push → deploy
+│   ├── request/                 # Request parsing
+│   ├── response/                # Unified JSON response envelope
+│   └── validator/               # Input validation
+├── docs/                        # Swagger/OpenAPI spec (auto-generated)
+├── infrastructure/              # Pulumi IaC (Go) — full AWS stack
+├── monitoring/alloy/            # Grafana Alloy sidecar (Prometheus scrape → Grafana Cloud)
+├── scripts/                     # Dev, build, and deploy scripts
+├── .github/workflows/           # CI/CD pipelines
 ├── Dockerfile                   # Multi-stage (api + worker targets)
-└── docker-compose.yml           # MongoDB, LocalStack, API, Worker
+└── docker-compose.yml           # Local dev stack
 ```
 
 ## Infrastructure (AWS via Pulumi)
 
-The `infrastructure/` directory contains Pulumi IaC (Go) that provisions the full production stack on AWS:
+The `infrastructure/` directory provisions the full production stack:
 
 | Resource | Details |
 |----------|---------|
 | **VPC** | Public subnet, internet gateway, security group (ingress 8080) |
-| **ECS Fargate** | Cluster with Container Insights enabled |
-| **API Service** | 0.25 vCPU / 512 MB, health check on `/health`, public IP |
+| **ECS Fargate** | Cluster with Container Insights |
+| **API Service** | 0.25 vCPU / 512 MB, health check on `/health` |
 | **Worker Service** | 0.25 vCPU / 512 MB, polls SQS, min-healthy 0% during deploy |
-| **Grafana Alloy sidecar** | Runs alongside API container, scrapes `/metrics` → Grafana Cloud |
-| **IAM** | Task execution role (ECR pull, CloudWatch logs, Secrets Manager) + task role (S3, SQS) |
-| **Secrets Manager** | Stores MONGO_URI, JWT_SECRET, GRAFANA_API_KEY — ECS pulls at runtime via `valueFrom` |
-| **CloudWatch** | Log groups `/image-pipeline/api` and `/image-pipeline/worker` (7-day retention) |
-| **API Gateway** | HTTP API with catch-all `ANY /{proxy+}` → ECS API task, auto-deploy stage |
-| **S3 + CloudFront** | Frontend static hosting with OAC, `/api/*` proxied to API Gateway via CloudFront Function |
+| **Alloy sidecar** | Scrapes `/metrics` → Grafana Cloud |
+| **IAM** | Execution role (ECR, CloudWatch, Secrets Manager) + task role (S3, SQS) |
+| **Secrets Manager** | MONGO_URI, JWT_SECRET, GRAFANA_API_KEY |
+| **CloudWatch** | Log groups with 7-day retention |
+| **API Gateway** | HTTP API with `ANY /{proxy+}` → ECS |
+| **S3 + CloudFront** | Frontend hosting with OAC, `/api/*` proxied to API Gateway |
 
 ### Deploying
 
 ```bash
 # Infrastructure
-cd infrastructure
-pulumi up --stack prod
+cd infrastructure && pulumi up --stack prod
 
 # Backend images
 ./scripts/push.sh v1
@@ -212,58 +211,45 @@ pulumi up --stack prod
 
 ### CI/CD
 
-Push to `main` triggers the GitHub Actions pipeline which runs tests, builds Docker images, pushes to ECR, and deploys via Pulumi. Frontend deploys are manual via `deploy-frontend.sh`.
+Push to `main` triggers GitHub Actions: test → build → push to ECR → deploy via Pulumi.
 
-Required GitHub secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `PULUMI_ACCESS_TOKEN`.
+Required secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `PULUMI_ACCESS_TOKEN`.
+
+## Testing
+
+```bash
+# Unit tests
+go test ./internal/auth/... ./internal/services/...
+
+# Integration tests (requires Docker for testcontainers)
+go test ./internal/tests/integration/... -timeout 5m
+```
+
+Integration tests spin up ephemeral MongoDB and LocalStack containers via testcontainers — no external dependencies needed.
 
 ## Observability
 
-- **Prometheus metrics** exposed at `GET /metrics` — HTTP request duration/count, upload pipeline counters, worker job stats, auth operations, compression ratios
-- **Grafana Alloy** sidecar scrapes the API every 15s and remote-writes to Grafana Cloud Hosted Prometheus
+- **Prometheus metrics** at `GET /metrics` — HTTP latency/count, upload pipeline counters, worker job stats, compression ratios
+- **Grafana Alloy** sidecar scrapes every 15s, remote-writes to Grafana Cloud
 - **Structured logging** via zap — every log line includes `requestId` and `userId`
-- **CloudWatch Logs** — all container stdout forwarded via `awslogs` driver
+- **CloudWatch Logs** — container stdout via `awslogs` driver
 
 ## Security
 
 - **Presigned URLs** — file bytes never touch the API server
-- **AWS Secrets Manager** — sensitive config pulled at runtime, never stored as plaintext env vars
+- **Secrets Manager** — sensitive config pulled at runtime, never plaintext env vars
 - **CloudFront OAC** — S3 buckets not publicly accessible
 - **JWT authentication** — all image endpoints require valid token
 - **Rate limiting** — token bucket per user
 - **Idempotency** — safe to retry uploads without duplicates
 - **CORS** — locked to specific allowed origins
 
-## Error Handling
-
-All errors use a centralized `AppError` system (`pkg/errors/`):
-
-```go
-// Machine-readable codes, consistent HTTP status mapping
-var ErrImageNotFound  = New(404, "IMAGE_NOT_FOUND", "image not found")
-var ErrImageForbidden = New(403, "IMAGE_FORBIDDEN", "you do not own this image")
-```
-
-Response envelope is always `{ status, code, message, data }` — clients can switch on `code` for programmatic error handling.
-
 ## Key Design Decisions
 
-- **Presigned URLs** — file bytes never reach the API server; S3 absorbs all upload bandwidth directly from the browser
+- **Presigned URLs** — S3 absorbs all upload bandwidth directly from the browser
 - **Idempotency** — safe to retry at every level (prepare, confirm, worker) using per-file idempotency keys
-- **Resilience** — all S3, SQS, and MongoDB calls wrapped with retry + exponential backoff
-- **Bulk S3 operations** — batch delete uses `DeleteObjects` API (1 call for up to 1000 keys, not N individual calls)
-- **Rate limiting** — token bucket per user with auto-cleanup
-- **Request-scoped logging** — `requestId` and `userId` on every log line
+- **Resilience** — all S3, SQS, and MongoDB calls wrapped with retry + exponential backoff + circuit breaker
+- **Bulk S3 operations** — batch delete uses `DeleteObjects` API (1 call for up to 1000 keys)
+- **Request-scoped logging** — `requestId` and `userId` on every log line for traceability
 - **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs before exit
 - **Single CloudFront distribution** — serves both frontend and API, so the frontend uses relative `/api` paths with zero CORS issues
-
-## Testing
-
-```bash
-# Unit tests
-go test ./internal/services/...
-
-# Integration tests (requires Docker for testcontainers)
-go test ./internal/tests/integration/...
-```
-
-Integration tests spin up ephemeral MongoDB and LocalStack containers via testcontainers — no external dependencies needed.

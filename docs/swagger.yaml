@@ -1,0 +1,987 @@
+basePath: /
+definitions:
+  docs.APIResponse:
+    properties:
+      code:
+        example: 200
+        type: integer
+      data: {}
+      message:
+        example: operation completed
+        type: string
+      status:
+        example: success
+        type: string
+    type: object
+  docs.BatchAsyncResult:
+    properties:
+      batchId:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      total:
+        example: 25
+        type: integer
+    type: object
+  docs.BatchIDsRequest:
+    properties:
+      ids:
+        example:
+        - id1
+        - id2
+        items:
+          type: string
+        type: array
+    type: object
+  docs.BatchResultItem:
+    properties:
+      error:
+        example: image not found
+        type: string
+      id:
+        example: 60d5ec49f1b2c72d88c1e1a1
+        type: string
+    type: object
+  docs.BatchSyncResult:
+    properties:
+      failed:
+        items:
+          $ref: '#/definitions/docs.BatchResultItem'
+        type: array
+      succeeded:
+        items:
+          $ref: '#/definitions/docs.BatchResultItem'
+        type: array
+    type: object
+  docs.BatchTransformRequest:
+    properties:
+      ids:
+        example:
+        - id1
+        - id2
+        items:
+          type: string
+        type: array
+      transformations:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.TransformConfig'
+        type: array
+    type: object
+  docs.ConfirmData:
+    properties:
+      enqueued:
+        example: 3
+        type: integer
+      total:
+        example: 3
+        type: integer
+    type: object
+  docs.ConfirmFileRequest:
+    properties:
+      filename:
+        example: photo.jpg
+        type: string
+      key:
+        example: raw/user123/uuid_photo.jpg
+        type: string
+      requestId:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+    type: object
+  docs.ConfirmUploadRequest:
+    properties:
+      files:
+        items:
+          $ref: '#/definitions/docs.ConfirmFileRequest'
+        type: array
+    type: object
+  docs.DeleteResult:
+    properties:
+      deleted:
+        items:
+          type: string
+        type: array
+      failed:
+        items:
+          $ref: '#/definitions/docs.BatchResultItem'
+        type: array
+    type: object
+  docs.ForgotPasswordData:
+    properties:
+      message:
+        example: if the email exists, a reset link has been sent
+        type: string
+      resetToken:
+        example: a1b2c3d4e5f6...
+        type: string
+    type: object
+  docs.ForgotPasswordRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    type: object
+  docs.LoginData:
+    properties:
+      token:
+        example: eyJhbGciOiJIUzI1NiIs...
+        type: string
+    type: object
+  docs.LoginRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      password:
+        example: MyStr0ng!Pass
+        type: string
+    type: object
+  docs.PaginatedImages:
+    properties:
+      images:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.Image'
+        type: array
+      limit:
+        example: 10
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 42
+        type: integer
+    type: object
+  docs.PrepareFileRequest:
+    properties:
+      contentType:
+        example: image/jpeg
+        type: string
+      filename:
+        example: photo.jpg
+        type: string
+      size:
+        example: 2097152
+        type: integer
+    type: object
+  docs.PrepareUploadRequest:
+    properties:
+      files:
+        items:
+          $ref: '#/definitions/docs.PrepareFileRequest'
+        type: array
+    type: object
+  docs.PreparedFile:
+    properties:
+      filename:
+        example: photo.jpg
+        type: string
+      key:
+        example: raw/user123/uuid_photo.jpg
+        type: string
+      requestId:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      uploadUrl:
+        example: https://s3.amazonaws.com/...
+        type: string
+    type: object
+  docs.RegisterRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      firstName:
+        example: Jane
+        type: string
+      lastName:
+        example: Doe
+        type: string
+      password:
+        example: MyStr0ng!Pass
+        type: string
+    type: object
+  docs.ResetPasswordRequest:
+    properties:
+      newPassword:
+        example: NewStr0ng!Pass
+        type: string
+      token:
+        example: a1b2c3d4e5f6...
+        type: string
+    type: object
+  docs.StorageInfo:
+    properties:
+      limitBytes:
+        example: 1073741824
+        type: integer
+      usedBytes:
+        example: 524288000
+        type: integer
+      usedPercent:
+        example: 48.8
+        type: number
+    type: object
+  docs.TransformRequest:
+    properties:
+      transformations:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.TransformConfig'
+        type: array
+    type: object
+  image-pipeline_internal_models.BatchError:
+    properties:
+      error:
+        type: string
+      imageId:
+        type: string
+    type: object
+  image-pipeline_internal_models.BatchJob:
+    properties:
+      completed:
+        type: integer
+      createdAt:
+        type: string
+      errors:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.BatchError'
+        type: array
+      failed:
+        type: integer
+      id:
+        type: string
+      imageIds:
+        items:
+          type: string
+        type: array
+      status:
+        description: '"processing", "completed", "partial"'
+        type: string
+      total:
+        type: integer
+      transformations:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.TransformConfig'
+        type: array
+      type:
+        description: '"transform" or "revert"'
+        type: string
+      userId:
+        type: string
+    type: object
+  image-pipeline_internal_models.Image:
+    properties:
+      compressedSize:
+        type: integer
+      compressedUrl:
+        type: string
+      createdAt:
+        type: string
+      filename:
+        type: string
+      id:
+        type: string
+      originalSize:
+        type: integer
+      originalUrl:
+        type: string
+      processingHistory:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.ProcessingStep'
+        type: array
+      requestId:
+        type: string
+      status:
+        type: string
+      transformations:
+        items:
+          $ref: '#/definitions/image-pipeline_internal_models.TransformConfig'
+        type: array
+      transformedUrl:
+        type: string
+      userId:
+        type: string
+    type: object
+  image-pipeline_internal_models.ProcessingStep:
+    properties:
+      detail:
+        description: e.g. "grayscale, watermark"
+        type: string
+      durationMs:
+        description: how long this step took
+        type: integer
+      sizeBytes:
+        description: size after this step
+        type: integer
+      step:
+        description: '"uploaded", "compressed", "transformed", "reverted"'
+        type: string
+      timestamp:
+        type: string
+    type: object
+  image-pipeline_internal_models.TransformConfig:
+    properties:
+      format:
+        type: string
+      height:
+        type: integer
+      logoUrl:
+        type: string
+      position:
+        description: bottom-right (default), bottom-left, top-right, top-left
+        type: string
+      text:
+        type: string
+      type:
+        type: string
+      width:
+        type: integer
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Image upload, compression, transformation, and storage management API.
+  title: Image Pipeline API
+  version: "1.0"
+paths:
+  /auth/forgot-password:
+    post:
+      consumes:
+      - application/json
+      description: Generates a reset token (15 min expiry). Always returns 200 to
+        prevent email enumeration. In production the token would be emailed.
+      parameters:
+      - description: Email address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.ForgotPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.ForgotPasswordData'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      summary: Request password reset
+      tags:
+      - Auth
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate with email and password, returns a JWT token valid
+        for 24 hours.
+      parameters:
+      - description: Login credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.LoginData'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "401":
+          description: Invalid credentials
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      summary: Log in
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: 'Create a new account with email, name, and password. Password
+        must meet policy: min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special
+        character.'
+      parameters:
+      - description: Registration payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User ID
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  type: string
+              type: object
+        "400":
+          description: Validation error or weak password
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "409":
+          description: Email already exists
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Registration failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      summary: Register a new user
+      tags:
+      - Auth
+  /auth/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: Set a new password using the reset token from forgot-password.
+        New password must meet password policy.
+      parameters:
+      - description: Token and new password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Password reset successful
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "400":
+          description: Invalid/expired token or weak password
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      summary: Reset password
+      tags:
+      - Auth
+  /batches/{batchId}:
+    get:
+      description: Poll the progress of a batch transform or revert operation.
+      parameters:
+      - description: Batch ID
+        in: path
+        name: batchId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/image-pipeline_internal_models.BatchJob'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Get batch job status
+      tags:
+      - Transforms
+  /image/{id}:
+    delete:
+      description: Delete a single image by ID. Only the owning user can delete.
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Delete failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete an image
+      tags:
+      - Images
+  /images:
+    delete:
+      consumes:
+      - application/json
+      description: Delete multiple images by IDs. Max 50 per request.
+      parameters:
+      - description: Image IDs to delete
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.BatchIDsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.DeleteResult'
+              type: object
+        "400":
+          description: No IDs or too many
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Batch delete failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Batch delete images
+      tags:
+      - Images
+    get:
+      description: Get a paginated list of the authenticated user's images. Supports
+        search and status filtering.
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: Items per page (max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Search by filename
+        in: query
+        name: search
+        type: string
+      - description: Filter by status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.PaginatedImages'
+              type: object
+        "500":
+          description: Fetch failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: List images
+      tags:
+      - Images
+  /images/{id}/cancel-transform:
+    post:
+      description: Cancel a transform that is still in "processing" status.
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cancelled
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel a pending transform
+      tags:
+      - Transforms
+  /images/{id}/revert-transform:
+    post:
+      description: Remove all applied transformations and restore the compressed version.
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/image-pipeline_internal_models.Image'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Revert transform on a single image
+      tags:
+      - Transforms
+  /images/{id}/transform:
+    post:
+      consumes:
+      - application/json
+      description: Enqueue transformations (grayscale, sepia, blur, sharpen, invert,
+        resize, crop, watermark, format, remove-bg) for a single image.
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Transformations to apply
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.TransformRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/image-pipeline_internal_models.Image'
+              type: object
+        "400":
+          description: Invalid transform
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Transform a single image
+      tags:
+      - Transforms
+  /images/{requestId}:
+    get:
+      description: Fetch a single image by its request ID (UUID assigned during prepare).
+      parameters:
+      - description: Request ID (UUID)
+        in: path
+        name: requestId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/image-pipeline_internal_models.Image'
+              type: object
+        "400":
+          description: Missing request ID
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "404":
+          description: Image not found
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Fetch failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Get image by request ID
+      tags:
+      - Images
+  /images/batch-revert-transform:
+    post:
+      consumes:
+      - application/json
+      description: Revert transformations on multiple images. Batches ≤10 processed
+        synchronously; larger batches enqueued to SQS.
+      parameters:
+      - description: Image IDs to revert
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.BatchIDsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Large batch — async enqueued
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.BatchAsyncResult'
+              type: object
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Enqueue failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Batch revert transforms
+      tags:
+      - Transforms
+  /images/batch-transform:
+    post:
+      consumes:
+      - application/json
+      description: Apply the same transformations to multiple images. Batches ≤10
+        are processed synchronously; larger batches are enqueued to SQS.
+      parameters:
+      - description: Image IDs and transformations
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.BatchTransformRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Large batch (>10) — async enqueued
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.BatchAsyncResult'
+              type: object
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Enqueue failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Batch transform images
+      tags:
+      - Transforms
+  /images/confirm:
+    post:
+      consumes:
+      - application/json
+      description: Confirm that files have been uploaded to S3 and enqueue them for
+        compression. Requires an idempotency key.
+      parameters:
+      - description: Idempotency key
+        in: header
+        name: X-Idempotency-Key
+        required: true
+        type: string
+      - description: Uploaded files to confirm
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.ConfirmUploadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.ConfirmData'
+              type: object
+        "400":
+          description: Missing idem key or no files
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "409":
+          description: Idempotency conflict
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Enqueue failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Confirm upload and enqueue processing
+      tags:
+      - Images
+  /images/prepare:
+    post:
+      consumes:
+      - application/json
+      description: 'Validate files and generate presigned S3 URLs. Max 30 files, 100MB
+        each, 500MB total. Allowed types: image/jpeg, image/png, image/webp.'
+      parameters:
+      - description: Files to upload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/docs.PrepareUploadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/docs.PreparedFile'
+                  type: array
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "413":
+          description: Storage quota exceeded
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+        "500":
+          description: Prepare failed
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Prepare file upload
+      tags:
+      - Images
+  /storage:
+    get:
+      description: Returns the user's current storage usage, quota limit, and usage
+        percentage.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/docs.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/docs.StorageInfo'
+              type: object
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/docs.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Get storage usage
+      tags:
+      - Storage
+securityDefinitions:
+  BearerAuth:
+    description: Enter "Bearer {token}"
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

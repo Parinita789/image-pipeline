@@ -44,40 +44,52 @@ func NewExecutor(logger *zap.Logger, name string, retries int, timeout time.Dura
 }
 
 func (e *executor) Execute(ctx context.Context, fn func(ctx context.Context) error) error {
-	var err error
+	var callerErr error
 	// Circuit breaker execution
 	maxAttempts := e.retries + 1
-	_, err = e.breaker.Execute(func() (interface{}, error) {
+	_, cbErr := e.breaker.Execute(func() (interface{}, error) {
 		for i := 0; i < maxAttempts; i++ {
 			runCtx, cancel := context.WithTimeout(ctx, e.timeout)
-			err = fn(runCtx)
+			callerErr = fn(runCtx)
 			cancel()
 
-			if err == nil {
+			if callerErr == nil {
 				return nil, nil
 			}
 
-			if isNonRetryable(err) {
+			if isClientCancellation(callerErr) {
+				e.logger.Info("client context cancelled, not counting as failure",
+					zap.String("executor", e.name),
+				)
+				return nil, nil
+			}
+
+			if isNonRetryable(callerErr) {
 				e.logger.Warn("non-retryable error, stopping",
 					zap.String("executor", e.name),
-					zap.Error(err),
+					zap.Error(callerErr),
 				)
-				return nil, err
+				return nil, callerErr
 			}
 
 			e.logger.Warn("retrying",
 				zap.String("executor", e.name),
 				zap.Int("attempt", i+1),
 				zap.Int("max_attempts", maxAttempts),
-				zap.Error(err),
+				zap.Error(callerErr),
 			)
 
 			time.Sleep(time.Duration(i) * time.Second)
 		}
-		return nil, err
+		return nil, callerErr
 	})
 
-	if err != nil {
+	err := callerErr
+	if cbErr != nil && err == nil {
+		err = cbErr
+	}
+
+	if err != nil && !isClientCancellation(err) {
 		e.logger.Error("circuit breaker error",
 			zap.String("executor", e.name),
 			zap.Error(err),
@@ -98,4 +110,8 @@ func isNonRetryable(err error) bool {
 	}
 
 	return false
+}
+
+func isClientCancellation(err error) bool {
+	return errors.Is(err, context.Canceled)
 }

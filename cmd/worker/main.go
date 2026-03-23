@@ -59,12 +59,14 @@ func main() {
 	idemRepo := repository.NewIdemRepo(db)
 
 	userRepo := repository.NewUserRepo(db)
+	batchRepo := repository.NewBatchRepo(db)
 
 	// Service Layer
 	imageService := services.NewImageService(
 		imageRepo,
 		idemRepo,
 		userRepo,
+		batchRepo,
 		s3Client,
 		s3Exec,
 		SQSClient,

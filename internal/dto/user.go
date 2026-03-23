@@ -11,3 +11,17 @@ type LoginUserDTO struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required"`
 }
+
+type ForgotPasswordDTO struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordDTO struct {
+	Token       string `json:"token" validate:"required"`
+	NewPassword string `json:"newPassword" validate:"required,min=8"`
+}
+
+type ChangePasswordDTO struct {
+	CurrentPassword string `json:"currentPassword" validate:"required"`
+	NewPassword     string `json:"newPassword" validate:"required,min=8"`
+}

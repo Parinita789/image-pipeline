@@ -4,6 +4,7 @@ import (
 	"context"
 	"image-pipeline/internal/models"
 	"io"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -33,27 +34,64 @@ func (m *MockIdemRepo) Acquire(ctx context.Context, key, hash string) (*models.I
 // ─── ImageRepo Mock ──────────────────────────────────────────────────────────
 
 type MockImageRepo struct {
-	SaveFn               func(ctx context.Context, image models.Image) error
-	FindRequestByIdFn    func(ctx context.Context, requestId string) (*models.Image, error)
-	GetPaginatedImagesFn func(ctx context.Context, page, limit int, userId string) ([]models.Image, int64, error)
-	DeleteImageFn        func(ctx context.Context, id string) (*models.Image, error)
-	UpdateImageFn        func(ctx context.Context, id string, update bson.M) (*models.Image, error)
+	SaveFn                    func(ctx context.Context, image models.Image) error
+	FindByIdFn                func(ctx context.Context, id string) (*models.Image, error)
+	FindRequestByIdFn         func(ctx context.Context, requestId string) (*models.Image, error)
+	GetPaginatedImagesFn      func(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error)
+	DeleteImageFn             func(ctx context.Context, id string) (*models.Image, error)
+	DeleteManyImagesFn        func(ctx context.Context, ids []string, userId string) ([]models.Image, error)
+	UpdateImageFn             func(ctx context.Context, id string, update bson.M) (*models.Image, error)
+	SumStorageByUserFn        func(ctx context.Context, userId string) (int64, error)
+	CreateProcessingRecordFn  func(ctx context.Context, requestId, userId, filename, rawS3Key string) error
+	ExpireStuckProcessingFn   func(ctx context.Context, userId string, timeout time.Duration)
 }
 
 func (m *MockImageRepo) Save(ctx context.Context, image models.Image) error {
 	return m.SaveFn(ctx, image)
 }
+func (m *MockImageRepo) FindById(ctx context.Context, id string) (*models.Image, error) {
+	if m.FindByIdFn != nil {
+		return m.FindByIdFn(ctx, id)
+	}
+	return nil, nil
+}
 func (m *MockImageRepo) FindRequestById(ctx context.Context, requestId string) (*models.Image, error) {
 	return m.FindRequestByIdFn(ctx, requestId)
 }
-func (m *MockImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string) ([]models.Image, int64, error) {
-	return m.GetPaginatedImagesFn(ctx, page, limit, userId)
+func (m *MockImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, userId string, filters models.ImageFilters) ([]models.Image, int64, error) {
+	return m.GetPaginatedImagesFn(ctx, page, limit, userId, filters)
 }
 func (m *MockImageRepo) DeleteImage(ctx context.Context, id string) (*models.Image, error) {
 	return m.DeleteImageFn(ctx, id)
 }
+func (m *MockImageRepo) DeleteManyImages(ctx context.Context, ids []string, userId string) ([]models.Image, error) {
+	if m.DeleteManyImagesFn != nil {
+		return m.DeleteManyImagesFn(ctx, ids, userId)
+	}
+	return nil, nil
+}
 func (m *MockImageRepo) UpdateImage(ctx context.Context, id string, update bson.M) (*models.Image, error) {
 	return m.UpdateImageFn(ctx, id, update)
+}
+func (m *MockImageRepo) SumStorageByUser(ctx context.Context, userId string) (int64, error) {
+	if m.SumStorageByUserFn != nil {
+		return m.SumStorageByUserFn(ctx, userId)
+	}
+	return 0, nil
+}
+func (m *MockImageRepo) CreateProcessingRecord(ctx context.Context, requestId, userId, filename, rawS3Key string) error {
+	if m.CreateProcessingRecordFn != nil {
+		return m.CreateProcessingRecordFn(ctx, requestId, userId, filename, rawS3Key)
+	}
+	return nil
+}
+func (m *MockImageRepo) UpdateImageByRequestId(ctx context.Context, requestId string, fields bson.M) error {
+	return nil
+}
+func (m *MockImageRepo) ExpireStuckProcessing(ctx context.Context, userId string, timeout time.Duration) {
+	if m.ExpireStuckProcessingFn != nil {
+		m.ExpireStuckProcessingFn(ctx, userId, timeout)
+	}
 }
 
 // ─── UserRepo Mock ───────────────────────────────────────────────────────────

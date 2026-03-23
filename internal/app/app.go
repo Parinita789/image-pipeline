@@ -10,6 +10,7 @@ import (
 
 	"image-pipeline/internal/auth"
 	"image-pipeline/internal/config"
+	"image-pipeline/internal/email"
 	"image-pipeline/internal/handlers"
 	applogger "image-pipeline/internal/logger"
 	"image-pipeline/internal/middleware"
@@ -68,12 +69,15 @@ func NewApp() *App {
 	imageRepo.CreateIndexes(context.Background())
 	idemRepo := repository.NewIdemRepo(db)
 	userRepo := repository.NewUserRepo(db)
+	batchRepo := repository.NewBatchRepo(db)
+	resetRepo := repository.NewPasswordResetRepo(db)
 
 	// Service Layer
 	imageService := services.NewImageService(
 		imageRepo,
 		idemRepo,
 		userRepo,
+		batchRepo,
 		s3Client,
 		s3Exec,
 		SQSClient,
@@ -81,8 +85,19 @@ func NewApp() *App {
 		cfg.CloudFrontDomain,
 	)
 
+	emailService := email.NewService(
+		cfg.SMTPHost,
+		cfg.SMTPPort,
+		cfg.SMTPUsername,
+		cfg.SMTPPassword,
+		cfg.SMTPFromEmail,
+		cfg.FrontendURL,
+	)
+
 	authService := auth.NewAuthService(
 		userRepo,
+		resetRepo,
+		emailService,
 		cfg.JWTSecret,
 	)
 

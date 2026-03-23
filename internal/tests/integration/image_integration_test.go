@@ -154,8 +154,10 @@ func setupSuite(ctx context.Context) (*suite, error) {
 	userRepo := repository.NewUserRepo(s.db)
 
 	jwtSecret := "integration-test-secret"
-	imageService := services.NewImageService(imageRepo, idemRepo, userRepo, s.s3Client, exec, s.sqsClient, exec, "")
-	authService := authpkg.NewAuthService(userRepo, jwtSecret)
+	batchRepo := repository.NewBatchRepo(s.db)
+	imageService := services.NewImageService(imageRepo, idemRepo, userRepo, batchRepo, s.s3Client, exec, s.sqsClient, exec, "")
+	resetRepo := repository.NewPasswordResetRepo(s.db)
+	authService := authpkg.NewAuthService(userRepo, resetRepo, jwtSecret)
 	authHandler := authpkg.NewAuthHandler(authService)
 	imageHandler := handlers.NewImageHandler(imageService)
 
@@ -284,7 +286,7 @@ func confirm(t *testing.T, token, idemKey string, files []preparedFile) {
 func TestIntegration_Register_HappyPath(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{
 		"firstName": "Jane", "lastName": "Doe",
-		"email": "jane_register@example.com", "password": "password123",
+		"email": "jane_register@example.com", "password": "Password1!",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -299,14 +301,14 @@ func TestIntegration_Register_HappyPath(t *testing.T) {
 func TestIntegration_Register_DuplicateEmail_Returns400(t *testing.T) {
 	email := "duplicate@example.com"
 	body, _ := json.Marshal(map[string]string{
-		"firstName": "Jane", "lastName": "Doe", "email": email, "password": "password123",
+		"firstName": "Jane", "lastName": "Doe", "email": email, "password": "Password1!",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	ts.router.ServeHTTP(httptest.NewRecorder(), req)
 
 	body, _ = json.Marshal(map[string]string{
-		"firstName": "Jane", "lastName": "Doe", "email": email, "password": "password123",
+		"firstName": "Jane", "lastName": "Doe", "email": email, "password": "Password1!",
 	})
 	req = httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -320,9 +322,9 @@ func TestIntegration_Register_DuplicateEmail_Returns400(t *testing.T) {
 
 func TestIntegration_Login_HappyPath(t *testing.T) {
 	email := "login_happy@example.com"
-	registerAndLogin(t, email, "mypassword")
+	registerAndLogin(t, email, "MyPassword1!")
 
-	body, _ := json.Marshal(map[string]string{"email": email, "password": "mypassword"})
+	body, _ := json.Marshal(map[string]string{"email": email, "password": "MyPassword1!"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -345,9 +347,9 @@ func TestIntegration_Login_HappyPath(t *testing.T) {
 
 func TestIntegration_Login_WrongPassword_Returns401(t *testing.T) {
 	email := "login_wrong_pass@example.com"
-	registerAndLogin(t, email, "correctpassword")
+	registerAndLogin(t, email, "Correct1!")
 
-	body, _ := json.Marshal(map[string]string{"email": email, "password": "wrongpassword"})
+	body, _ := json.Marshal(map[string]string{"email": email, "password": "Wrong1!xx"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -361,7 +363,7 @@ func TestIntegration_Login_WrongPassword_Returns401(t *testing.T) {
 // ─── Prepare Tests ────────────────────────────────────────────────────────────
 
 func TestIntegration_Prepare_HappyPath_ReturnsPresignedURLs(t *testing.T) {
-	token := registerAndLogin(t, "prepare_happy@example.com", "password123")
+	token := registerAndLogin(t, "prepare_happy@example.com", "Password1!")
 	jpegData := makeJPEG()
 
 	prepared := prepare(t, token, []map[string]any{
@@ -397,7 +399,7 @@ func TestIntegration_Prepare_NoAuth_Returns401(t *testing.T) {
 }
 
 func TestIntegration_Prepare_UnsupportedFileType_Returns400(t *testing.T) {
-	token := registerAndLogin(t, "prepare_badtype@example.com", "password123")
+	token := registerAndLogin(t, "prepare_badtype@example.com", "Password1!")
 
 	body, _ := json.Marshal(map[string]any{
 		"files": []map[string]any{{"filename": "doc.pdf", "contentType": "application/pdf", "size": 1024}},
@@ -414,7 +416,7 @@ func TestIntegration_Prepare_UnsupportedFileType_Returns400(t *testing.T) {
 }
 
 func TestIntegration_Prepare_FileTooLarge_Returns400(t *testing.T) {
-	token := registerAndLogin(t, "prepare_toolarge@example.com", "password123")
+	token := registerAndLogin(t, "prepare_toolarge@example.com", "Password1!")
 
 	body, _ := json.Marshal(map[string]any{
 		"files": []map[string]any{{"filename": "big.jpg", "contentType": "image/jpeg", "size": int64(200 * 1024 * 1024)}},
@@ -433,7 +435,7 @@ func TestIntegration_Prepare_FileTooLarge_Returns400(t *testing.T) {
 // ─── Confirm Tests ────────────────────────────────────────────────────────────
 
 func TestIntegration_PrepareAndConfirm_FileActuallyInS3(t *testing.T) {
-	token := registerAndLogin(t, "confirm_s3@example.com", "password123")
+	token := registerAndLogin(t, "confirm_s3@example.com", "Password1!")
 	jpegData := makeJPEG()
 
 	// Step 1: prepare
@@ -456,7 +458,7 @@ func TestIntegration_PrepareAndConfirm_FileActuallyInS3(t *testing.T) {
 }
 
 func TestIntegration_PrepareAndConfirm_MessageLandsInSQS(t *testing.T) {
-	token := registerAndLogin(t, "confirm_sqs@example.com", "password123")
+	token := registerAndLogin(t, "confirm_sqs@example.com", "Password1!")
 	jpegData := makeJPEG()
 
 	// Step 1: prepare
@@ -483,7 +485,7 @@ func TestIntegration_PrepareAndConfirm_MessageLandsInSQS(t *testing.T) {
 }
 
 func TestIntegration_Confirm_MissingIdemKey_Returns400(t *testing.T) {
-	token := registerAndLogin(t, "confirm_noidem@example.com", "password123")
+	token := registerAndLogin(t, "confirm_noidem@example.com", "Password1!")
 
 	body, _ := json.Marshal(map[string]any{
 		"files": []map[string]any{{"key": "raw/u/req_photo.jpg", "filename": "photo.jpg", "requestId": "req-1"}},
@@ -516,7 +518,7 @@ func TestIntegration_Confirm_NoAuth_Returns401(t *testing.T) {
 }
 
 func TestIntegration_Confirm_BatchOfFiles_AllEnqueued(t *testing.T) {
-	token := registerAndLogin(t, "confirm_batch@example.com", "password123")
+	token := registerAndLogin(t, "confirm_batch@example.com", "Password1!")
 	jpegData := makeJPEG()
 
 	// Prepare 3 files
@@ -576,7 +578,7 @@ func TestIntegration_GetImages_NoAuth_Returns401(t *testing.T) {
 }
 
 func TestIntegration_GetImages_WithAuth_Returns200(t *testing.T) {
-	token := registerAndLogin(t, "getimages@example.com", "password123")
+	token := registerAndLogin(t, "getimages@example.com", "Password1!")
 
 	req := httptest.NewRequest(http.MethodGet, "/images?page=1&limit=10", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

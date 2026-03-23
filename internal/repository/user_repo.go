@@ -64,6 +64,15 @@ func (r *UserRepo) UpdateStorageUsed(ctx context.Context, userId string, deltaBy
 	return err
 }
 
+func (r *UserRepo) UpdatePassword(ctx context.Context, userId string, hashedPassword string) error {
+	objID, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		return err
+	}
+	_, err = r.collection.UpdateOne(ctx, bson.M{"_id": objID}, bson.M{"$set": bson.M{"password": hashedPassword}})
+	return err
+}
+
 func (r *UserRepo) SetDefaultQuota(ctx context.Context, userId string) error {
 	objID, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {

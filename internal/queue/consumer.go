@@ -11,8 +11,9 @@ import (
 func (s *SQSClient) ReceiveMessage(ctx context.Context) ([]types.Message, error) {
 	out, err := s.Client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(s.QueueURL),
-		MaxNumberOfMessages: 5,
-		WaitTimeSeconds:     10,
+		MaxNumberOfMessages: 10,
+		WaitTimeSeconds:     20,
+		VisibilityTimeout:   60,
 	})
 
 	if err != nil {

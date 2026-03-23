@@ -30,7 +30,7 @@ func (r *ImageRepo) Save(ctx context.Context, image models.Image) error {
 		"userId":         image.UserID,
 		"filename":       image.Filename,
 		"originalUrl":    image.OriginalURL,
-		"status":         "compressed",
+		"status":         models.ImageStatusCompressed,
 		"compressedUrl":  image.CompressedURL,
 		"originalSize":   image.OriginalSize,
 		"compressedSize": image.CompressedSize,
@@ -40,6 +40,9 @@ func (r *ImageRepo) Save(ctx context.Context, image models.Image) error {
 	}
 	if image.TransformedURL != "" {
 		setFields["transformedUrl"] = image.TransformedURL
+	}
+	if len(image.ProcessingHistory) > 0 {
+		setFields["processingHistory"] = image.ProcessingHistory
 	}
 	_, err := r.Collection.UpdateOne(
 		ctx,
@@ -53,6 +56,11 @@ func (r *ImageRepo) Save(ctx context.Context, image models.Image) error {
 	return err
 }
 
+func (r *ImageRepo) UpdateImageByRequestId(ctx context.Context, requestId string, fields bson.M) error {
+	_, err := r.Collection.UpdateOne(ctx, bson.M{"requestId": requestId}, bson.M{"$set": fields})
+	return err
+}
+
 func (r *ImageRepo) CreateProcessingRecord(ctx context.Context, requestId, userId, filename, rawS3Key string) error {
 	_, err := r.Collection.UpdateOne(
 		ctx,
@@ -63,13 +71,25 @@ func (r *ImageRepo) CreateProcessingRecord(ctx context.Context, requestId, userI
 				"userId":      userId,
 				"filename":    filename,
 				"originalUrl": rawS3Key,
-				"status":      "processing",
+				"status":      models.ImageStatusProcessing,
 				"createdAt":   time.Now(),
 			},
 		},
 		options.Update().SetUpsert(true),
 	)
 	return err
+}
+
+func (r *ImageRepo) ExpireStuckProcessing(ctx context.Context, userId string, timeout time.Duration) {
+	cutoff := time.Now().Add(-timeout)
+	r.Collection.UpdateMany(ctx, //nolint:errcheck
+		bson.M{
+			"userId":    userId,
+			"status":    models.ImageStatusProcessing,
+			"createdAt": bson.M{"$lt": cutoff},
+		},
+		bson.M{"$set": bson.M{"status": models.ImageStatusFailed}},
+	)
 }
 
 func (r *ImageRepo) CreateIndexes(ctx context.Context) error {
@@ -90,7 +110,6 @@ func (r *ImageRepo) GetPaginatedImages(ctx context.Context, page, limit int, use
 	err := r.runMongo(ctx, func(ctx context.Context) error {
 		filter := bson.M{"userId": userId}
 
-		// filename search — case insensitive partial match
 		if filters.Search != "" {
 			filter["filename"] = bson.M{"$regex": filters.Search, "$options": "i"}
 		}

@@ -101,6 +101,11 @@ func (m *mockImageRepo) SumStorageByUser(ctx context.Context, userId string) (in
 func (m *mockImageRepo) CreateProcessingRecord(ctx context.Context, requestId, userId, filename, rawS3Key string) error {
 	return nil
 }
+func (m *mockImageRepo) UpdateImageByRequestId(ctx context.Context, requestId string, fields bson.M) error {
+	return nil
+}
+func (m *mockImageRepo) ExpireStuckProcessing(ctx context.Context, userId string, timeout time.Duration) {
+}
 
 type mockUserRepo struct {
 	getUserByIdFn      func(ctx context.Context, userId string) (*models.User, error)
@@ -445,8 +450,8 @@ func TestProcessUpload_HappyPath_JPEG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if savedImage.RequestID != "idem-1" {
-		t.Errorf("expected requestID 'idem-1', got '%s'", savedImage.RequestID)
+	if savedImage.RequestID != "req-1" {
+		t.Errorf("expected requestID 'req-1', got '%s'", savedImage.RequestID)
 	}
 	if finalStatus != models.StatusCompleted {
 		t.Errorf("expected status Completed, got %v", finalStatus)

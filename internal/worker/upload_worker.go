@@ -93,9 +93,12 @@ func (w *Worker) workerLoop(ctx context.Context, id int) {
 	for msg := range w.jobChan {
 		var payload models.UploadMessage
 
+		w.logger.Info("received SQS message", zap.String("body", *msg.Body))
+
 		err := json.Unmarshal([]byte(*msg.Body), &payload)
 		if err != nil {
 			w.logger.Error("Invalid message", zap.Error(err))
+			continue
 		}
 
 		jobLog := w.logger.With(
@@ -106,17 +109,26 @@ func (w *Worker) workerLoop(ctx context.Context, id int) {
 
 		jobCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
+		jobLog.Info("dispatching job", zap.String("action", payload.Action))
+
 		switch payload.Action {
 		case models.ActionTransform:
 			err = w.imageService.ProcessTransform(jobCtx, payload)
+		case models.ActionBatchTransform:
+			err = w.imageService.ProcessBatchTransform(jobCtx, payload)
+		case models.ActionBatchRevert:
+			err = w.imageService.ProcessBatchRevert(jobCtx, payload)
 		default:
-			// "compress" or empty (backwards compat)
 			err = w.imageService.ProcessUpload(jobCtx, payload)
 		}
 		cancel()
 
+		jobLog.Info("job completed", zap.Bool("success", err == nil))
+
 		if err != nil {
 			jobLog.Error("job failed", zap.Error(err))
+			// Delete the message — the image record is already marked "failed" in the DB,
+			_ = w.sqs.DeleteMessage(ctx, *msg.ReceiptHandle)
 			continue
 		}
 

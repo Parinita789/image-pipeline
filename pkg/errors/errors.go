@@ -16,6 +16,11 @@ var (
 	ErrInvalidCredentials = New(http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
 	ErrEmailExists        = New(http.StatusConflict, "EMAIL_EXISTS", "email already exists")
 	ErrRegistrationFailed = New(http.StatusInternalServerError, "REGISTRATION_FAILED", "registration failed")
+	ErrWeakPassword       = New(http.StatusBadRequest, "WEAK_PASSWORD", "password too weak: %s")
+	ErrInvalidResetToken    = New(http.StatusBadRequest, "INVALID_RESET_TOKEN", "invalid or expired reset token")
+	ErrIncorrectPassword    = New(http.StatusUnauthorized, "INCORRECT_PASSWORD", "current password is incorrect")
+	ErrSamePassword         = New(http.StatusBadRequest, "SAME_PASSWORD", "new password must be different from current password")
+	ErrEmailSendFailed      = New(http.StatusInternalServerError, "EMAIL_SEND_FAILED", "failed to send reset email")
 )
 
 // Images

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 func RegisterRoutes(
@@ -38,20 +39,28 @@ func RegisterRoutes(
 	})
 
 	router.Handle("/metrics", promhttp.Handler())
+	router.Get("/swagger/*", httpSwagger.WrapHandler)
 
 	router.Route("/auth", func(r chi.Router) {
 		r.Post("/register", auth.Register)
 		r.Post("/login", auth.Login)
+		r.Post("/forgot-password", auth.ForgotPassword)
+		r.Post("/reset-password", auth.ResetPassword)
 	})
 
 	router.Group(func(pr chi.Router) {
 		pr.Use(auth.JWTAuth(jwtSecret))
+		pr.Post("/auth/change-password", auth.ChangePassword)
 		pr.Post("/images/prepare", imageHandler.PrepareUpload)
 		pr.With(middleware.IdempotencyCheck(idemRepo)).Post("/images/confirm", imageHandler.ConfirmUpload)
 		pr.Get("/images", imageHandler.GetImages)
 		pr.Get("/images/{requestId}", imageHandler.GetImageByRequestId)
+		pr.Post("/images/batch-transform", imageHandler.BatchTransformImages)
+		pr.Post("/images/batch-revert-transform", imageHandler.BatchRevertTransform)
+		pr.Get("/batches/{batchId}", imageHandler.GetBatchStatus)
 		pr.Post("/images/{id}/transform", imageHandler.TransformImage)
 		pr.Post("/images/{id}/cancel-transform", imageHandler.CancelTransform)
+		pr.Post("/images/{id}/revert-transform", imageHandler.RevertTransform)
 		pr.Delete("/image/{id}", imageHandler.DeleteImage)
 		pr.Delete("/images", imageHandler.BatchDeleteImages)
 		pr.Get("/storage", imageHandler.GetStorageInfo)
