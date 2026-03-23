@@ -28,6 +28,7 @@ import (
 
 type IIdempotencyRepo interface {
 	Get(ctx context.Context, key string) (*models.IdempotencyRecord, error)
+	Create(ctx context.Context, key string, hash string) error
 	UpdateStatus(ctx context.Context, key string, status models.IdempotencyStatus) error
 	Acquire(ctx context.Context, key, hash string) (*models.IdempotencyRecord, bool, error)
 }
@@ -172,13 +173,22 @@ func (s *ImageService) CheckStorageQuota(ctx context.Context, userId string, inc
 
 func (s *ImageService) ConfirmUpload(ctx context.Context, userId, idemKey string, files []ConfirmFile) (int, error) {
 	log := logger.FromContext(ctx)
+	isBatch := len(files) > 1
 	enqueued := 0
+
 	for i, f := range files {
 		if err := s.ImageRepo.CreateProcessingRecord(ctx, f.RequestID, userId, f.Filename, f.Key); err != nil {
 			log.Error("failed to create processing record", zap.Error(err))
 		}
 
-		fileIdemKey := fmt.Sprintf("%s-%d", idemKey, i)
+		fileIdemKey := idemKey
+		if isBatch {
+			fileIdemKey = fmt.Sprintf("%s-%d", idemKey, i)
+			if err := s.IdemRepo.Create(ctx, fileIdemKey, f.RequestID); err != nil {
+				log.Warn("failed to create per-file idem record (may already exist)", zap.Error(err))
+			}
+		}
+
 		msg := models.UploadMessage{
 			Action:         models.ActionCompress,
 			IdempotencyKey: fileIdemKey,
@@ -189,14 +199,21 @@ func (s *ImageService) ConfirmUpload(ctx context.Context, userId, idemKey string
 		}
 		if err := s.publishToSQS(ctx, msg); err != nil {
 			log.Error("failed to publish msg to sqs", zap.Error(err))
-			// Mark the orphaned processing record as failed so it doesn't stay stuck in "processing"
 			s.ImageRepo.UpdateImageByRequestId(ctx, f.RequestID, bson.M{"status": models.ImageStatusFailed})
+			s.IdemRepo.UpdateStatus(ctx, fileIdemKey, models.StatusFailed)
 			metrics.UploadErrorsTotal.WithLabelValues("sqs").Inc()
 			return enqueued, err
 		}
 		enqueued++
 		metrics.UploadEnqueuedTotal.Inc()
 	}
+
+	if isBatch {
+		if err := s.IdemRepo.UpdateStatus(ctx, idemKey, models.StatusCompleted); err != nil {
+			log.Error("failed to mark batch idem record completed", zap.Error(err))
+		}
+	}
+
 	return enqueued, nil
 }
 

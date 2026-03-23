@@ -57,6 +57,20 @@ Browser                              AWS
 - **Storage quotas** — per-user storage limits with usage tracking
 - **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs
 
+## Scalability
+
+The architecture is designed for horizontal scalability — the API and worker are stateless, file bytes never touch the API server, and processing is fully decoupled via SQS.
+
+**What scales today:**
+- **API layer** — Go + Chi can handle 1k+ req/s per instance; presigned S3 URLs offload all upload bandwidth from the server
+- **SQS** — supports up to 3,000 msg/sec per queue with batching, well beyond current needs
+- **S3 + CloudFront** — effectively unlimited for storage and delivery
+
+**What needs tuning for production load:**
+- **Worker throughput** — currently 5 workers on a single ECS instance; scale by increasing `WORKER_COUNT` and adding ECS auto-scaling based on SQS queue depth
+- **MongoDB** — single instance; would need replica set with read replicas, connection pool tuning, and cursor-based pagination (currently skip-based)
+- **Caching** — no Redis layer; user lookups and storage quota checks hit MongoDB on every request
+
 ## API Documentation
 
 Full API documentation is available via **Swagger UI**:
@@ -253,3 +267,13 @@ Integration tests spin up ephemeral MongoDB and LocalStack containers via testco
 - **Request-scoped logging** — `requestId` and `userId` on every log line for traceability
 - **Graceful shutdown** — API drains in-flight requests, worker drains in-flight jobs before exit
 - **Single CloudFront distribution** — serves both frontend and API, so the frontend uses relative `/api` paths with zero CORS issues
+- **SQS over Kafka** — SQS is the right fit at this scale: fully managed, zero ops, ~$0.40/million messages, built-in retry and DLQ support. Kafka adds operational complexity (brokers, partitions, consumer groups) that only pays off at 100k+ msg/sec or when you need ordering guarantees and message replay
+
+## Future Enhancements
+
+- [ ] **Dead letter queue** — isolate poison messages and failed jobs; CloudWatch alarm on DLQ depth for alerting
+- [ ] **Cursor-based pagination** — replace `Skip(offset)` with keyset pagination on `_id`/`createdAt` for O(1) page lookups at scale
+- [ ] **Redis caching** — cache user profiles and storage quota on the hot read path to reduce MongoDB load
+- [ ] **ECS auto-scaling** — target tracking policies: scale API on CPU utilization, scale workers on `ApproximateNumberOfMessagesVisible`
+- [ ] **MongoDB replica set** — read replicas for query load, connection pool tuning (`maxPoolSize`)
+- [ ] **Pre-generated thumbnails** — generate multiple sizes at upload time to avoid serving full-resolution images in grid views
